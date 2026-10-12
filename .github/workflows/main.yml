@@ -37,6 +37,24 @@ jobs:
         working-directory: client
         run: npm run build
 
+    
+      - name: Debug backend package
+        working-directory: server
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Backend package scripts:"
+          node -e "console.log(JSON.stringify(require('./package.json').scripts, null, 2))"
+          echo "Backend package location:"
+          ls -la package.json package-lock.json
+          echo "Checked out commit:"
+          git rev-parse --short HEAD
+
+      - name: Run backend tests
+        working-directory: server
+        run: npm test
+
+
 
   backend-tests:
     name: Backend Tests
