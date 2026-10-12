@@ -1,3 +1,6 @@
+export * from './tokenService.js';
+export { default as tokenService } from './tokenService.js';
+
 /**
  * Standard utility helpers
  */
