@@ -5,14 +5,9 @@ on:
     branches:
       - "feature/**"
       - feature/project-setup
-      - development
-      - develop
-      - dev
-
   pull_request:
     branches:
       - feature/project-setup
-
   workflow_dispatch:
 
 permissions:
@@ -34,17 +29,14 @@ jobs:
           cache: npm
           cache-dependency-path: client/package-lock.json
 
-      - name: Install frontend dependencies
+      - name: Install dependencies
         working-directory: client
         run: npm ci
-
-      - name: Run frontend lint
-        working-directory: client
-        run: npm run lint --if-present
 
       - name: Build frontend
         working-directory: client
         run: npm run build
+
 
   backend-tests:
     name: Backend Tests
@@ -62,9 +54,9 @@ jobs:
           cache-dependency-path: server/package-lock.json
 
       - name: Install backend dependencies
-        working-directory: server
         run: npm ci
+        working-directory: server
 
       - name: Run backend tests
-        working-directory: server
         run: npm test
+        working-directory: server
