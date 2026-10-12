@@ -41,13 +41,11 @@ jobs:
 
         
  
+
+
   backend-tests:
     name: Backend Tests
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: server
 
     steps:
       - name: Checkout repository
@@ -60,9 +58,10 @@ jobs:
           cache: npm
           cache-dependency-path: server/package-lock.json
 
-      - name: Install dependencies
+      - name: Install backend dependencies
         run: npm ci
+        working-directory: server
 
-      - name: Run automated tests
+      - name: Run backend tests
         run: npm test
-
+        working-directory: server
