@@ -1,6 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerValidation, loginValidation } from '../src/validators/authValidators.js';
+import { register } from '../src/controllers/auth/authController.js';
+import { User } from '../src/models/User.js';
+import { Wallet } from '../src/models/Wallet.js';
 
 describe('Auth Validators Unit Tests', () => {
   const createMockRes = () => {
@@ -20,13 +23,12 @@ describe('Auth Validators Unit Tests', () => {
   };
 
   describe('registerValidation', () => {
-    it('passes validation for valid user registration input', () => {
+    it('passes validation for valid user registration input without role', () => {
       const req = {
         body: {
           name: 'Jane Doe',
           email: 'jane@example.com',
           password: 'securepassword123',
-          role: 'user',
         },
       };
       const res = createMockRes();
@@ -105,7 +107,30 @@ describe('Auth Validators Unit Tests', () => {
       assert.ok(res.jsonData.errors.includes('Password must be at least 6 characters long'));
     });
 
-    it('fails when role is not user or admin', () => {
+    it('fails when role: admin is explicitly provided', () => {
+      const req = {
+        body: {
+          name: 'Jane Doe',
+          email: 'jane@example.com',
+          password: 'securepassword123',
+          role: 'admin',
+        },
+      };
+      const res = createMockRes();
+      let nextCalled = false;
+      const next = () => {
+        nextCalled = true;
+      };
+
+      registerValidation(req, res, next);
+
+      assert.strictEqual(nextCalled, false);
+      assert.strictEqual(res.statusCode, 400);
+      assert.strictEqual(res.jsonData.success, false);
+      assert.ok(res.jsonData.errors.includes('Role cannot be specified during registration'));
+    });
+
+    it('fails when other unsupported roles are provided', () => {
       const req = {
         body: {
           name: 'Jane Doe',
@@ -124,7 +149,31 @@ describe('Auth Validators Unit Tests', () => {
 
       assert.strictEqual(nextCalled, false);
       assert.strictEqual(res.statusCode, 400);
-      assert.ok(res.jsonData.errors.includes('Role must be either user or admin'));
+      assert.strictEqual(res.jsonData.success, false);
+      assert.ok(res.jsonData.errors.includes('Role cannot be specified during registration'));
+    });
+
+    it('fails when role: user is explicitly provided in request body', () => {
+      const req = {
+        body: {
+          name: 'Jane Doe',
+          email: 'jane@example.com',
+          password: 'securepassword123',
+          role: 'user',
+        },
+      };
+      const res = createMockRes();
+      let nextCalled = false;
+      const next = () => {
+        nextCalled = true;
+      };
+
+      registerValidation(req, res, next);
+
+      assert.strictEqual(nextCalled, false);
+      assert.strictEqual(res.statusCode, 400);
+      assert.strictEqual(res.jsonData.success, false);
+      assert.ok(res.jsonData.errors.includes('Role cannot be specified during registration'));
     });
   });
 
@@ -184,6 +233,76 @@ describe('Auth Validators Unit Tests', () => {
       assert.strictEqual(nextCalled, false);
       assert.strictEqual(res.statusCode, 400);
       assert.ok(res.jsonData.errors.includes('Password is required'));
+    });
+  });
+
+  describe('register controller role enforcement', () => {
+    it('always creates user with role: user even if request attempts to supply role: admin', async () => {
+      const originalUserFindOne = User.findOne;
+      const originalUserCreate = User.create;
+      const originalWalletFindOne = Wallet.findOne;
+      const originalWalletCreate = Wallet.create;
+
+      let capturedUserPayload = null;
+
+      User.findOne = async () => null;
+      User.create = async (payload) => {
+        capturedUserPayload = payload;
+        return {
+          _id: '652a1234567890abcdef1234',
+          ...payload,
+          toJSON: () => ({ _id: '652a1234567890abcdef1234', ...payload }),
+        };
+      };
+      Wallet.findOne = async () => null;
+      Wallet.create = async (payload) => ({
+        _id: '652a9999999999abcdef9999',
+        ...payload,
+      });
+
+      const req = {
+        body: {
+          name: 'Attacker Test',
+          email: 'attacker@example.com',
+          password: 'password123',
+          role: 'admin',
+        },
+      };
+
+      const res = {
+        statusCode: null,
+        jsonData: null,
+        status(code) {
+          this.statusCode = code;
+          return this;
+        },
+        json(data) {
+          this.jsonData = data;
+          return this;
+        },
+        cookie() {},
+      };
+
+      let nextCalled = false;
+      const next = () => {
+        nextCalled = true;
+      };
+
+      try {
+        await register(req, res, next);
+
+        assert.strictEqual(nextCalled, false);
+        assert.strictEqual(res.statusCode, 201);
+        assert.strictEqual(res.jsonData.success, true);
+        assert.strictEqual(capturedUserPayload.role, 'user');
+        assert.notStrictEqual(capturedUserPayload.role, 'admin');
+        assert.strictEqual(res.jsonData.data.user.role, 'user');
+      } finally {
+        User.findOne = originalUserFindOne;
+        User.create = originalUserCreate;
+        Wallet.findOne = originalWalletFindOne;
+        Wallet.create = originalWalletCreate;
+      }
     });
   });
 });

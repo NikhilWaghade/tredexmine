@@ -6,3 +6,11 @@ export { default as Wallet } from './Wallet.js';
 
 export * from './Transaction.js';
 export { default as Transaction } from './Transaction.js';
+
+export * from './Plan.js';
+export { default as Plan } from './Plan.js';
+
+export * from './UserPlan.js';
+export { default as UserPlan } from './UserPlan.js';
+
+

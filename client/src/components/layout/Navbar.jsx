@@ -1,19 +1,15 @@
-import { useState, useEffect } from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, NavLink } from 'react-router-dom';
 import { NAV_LINKS, ROUTES } from '../../constants';
 import { Container, Button } from '../common';
 import { useScrollPosition } from '../../hooks';
+import { useAuth } from '../../context';
 import { cn } from '../../utils';
 
 export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const scrollPosition = useScrollPosition();
-  const location = useLocation();
-
-  // Close mobile menu on route change
-  useEffect(() => {
-    setMobileMenuOpen(false);
-  }, [location.pathname]);
+  const { user, wallet, isAuthenticated, openAuthModal, logout } = useAuth();
 
   const isScrolled = scrollPosition > 20;
 
@@ -72,12 +68,48 @@ export function Navbar() {
 
           {/* Desktop Right Action */}
           <div className="hidden md:flex items-center gap-3">
-            <Button to={ROUTES.CONTACT} variant="outline" size="sm">
-              Contact Us
-            </Button>
-            <Button to={ROUTES.ABOUT} variant="primary" size="sm">
-              Explore Platform
-            </Button>
+            {isAuthenticated ? (
+              <div className="flex items-center gap-3">
+                {/* Live Wallet Balance Badge */}
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-purple-950/60 border border-purple-800/40 text-xs">
+                  <svg
+                    className="w-4 h-4 text-purple-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+                    />
+                  </svg>
+                  <span className="text-gray-400 font-medium">Balance:</span>
+                  <span className="font-bold text-emerald-400">
+                    ${wallet?.balance != null ? Number(wallet.balance).toFixed(2) : '0.00'}
+                  </span>
+                </div>
+
+                {/* User Name & Logout */}
+                <span className="text-xs text-gray-300 max-w-[120px] truncate" title={user?.name || user?.email}>
+                  {user?.name || user?.email}
+                </span>
+
+                <Button onClick={logout} variant="ghost" size="sm" className="text-xs">
+                  Sign Out
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <Button onClick={openAuthModal} variant="outline" size="sm">
+                  Sign In
+                </Button>
+                <Button to={ROUTES.PLANS} variant="primary" size="sm">
+                  Explore Plans
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Mobile Menu Toggle Button */}
@@ -120,6 +152,7 @@ export function Navbar() {
                 <NavLink
                   key={link.path}
                   to={link.path}
+                  onClick={() => setMobileMenuOpen(false)}
                   className={({ isActive }) =>
                     cn(
                       'px-4 py-3 rounded-xl text-base font-medium transition-all duration-200 flex items-center justify-between',
@@ -134,13 +167,55 @@ export function Navbar() {
                 </NavLink>
               ))}
             </nav>
-            <div className="mt-4 pt-4 border-t border-white/10 flex flex-col gap-2.5">
-              <Button to={ROUTES.CONTACT} variant="outline" size="md" className="w-full">
-                Contact Us
-              </Button>
-              <Button to={ROUTES.ABOUT} variant="primary" size="md" className="w-full">
-                Explore Platform
-              </Button>
+
+            <div className="mt-4 pt-4 border-t border-white/10 flex flex-col gap-3">
+              {isAuthenticated ? (
+                <>
+                  <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-purple-950/60 border border-purple-800/40 text-sm">
+                    <span className="text-gray-400 font-medium">Wallet Balance:</span>
+                    <span className="font-bold text-emerald-400">
+                      ${wallet?.balance != null ? Number(wallet.balance).toFixed(2) : '0.00'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-400 px-1">
+                    Signed in as <span className="text-white font-medium">{user?.email}</span>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      logout();
+                      setMobileMenuOpen(false);
+                    }}
+                    variant="outline"
+                    size="md"
+                    className="w-full"
+                  >
+                    Sign Out
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    onClick={() => {
+                      openAuthModal();
+                      setMobileMenuOpen(false);
+                    }}
+                    variant="outline"
+                    size="md"
+                    className="w-full"
+                  >
+                    Sign In
+                  </Button>
+                  <Button
+                    to={ROUTES.PLANS}
+                    onClick={() => setMobileMenuOpen(false)}
+                    variant="primary"
+                    size="md"
+                    className="w-full"
+                  >
+                    Explore Plans
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -150,3 +225,4 @@ export function Navbar() {
 }
 
 export default Navbar;
+
