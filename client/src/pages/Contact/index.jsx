@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Container, Button, Card, SectionHeader } from '../../components/common';
+import { Container, Button, Card } from '../../components/common';
 
 export function ContactPage() {
   const [formData, setFormData] = useState({

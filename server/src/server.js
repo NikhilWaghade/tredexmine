@@ -15,7 +15,12 @@ process.on('uncaughtException', (err) => {
 
 // Initialize database connection and start HTTP server
 const startServer = async () => {
-  await connectDB();
+  try {
+    await connectDB();
+  } catch (error) {
+    console.error(`[Server] Failed to connect to database: ${error.message}`);
+    process.exit(1);
+  }
 
   const server = app.listen(PORT, () => {
     console.log(`[Server] TreadExMine backend running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);

@@ -12,10 +12,7 @@ export const connectDB = async () => {
     return conn;
   } catch (error) {
     console.error(`[MongoDB] Connection error: ${error.message}`);
-    // Do not crash hard in local dev if MongoDB is not running yet
-    if (process.env.NODE_ENV === 'production') {
-      process.exit(1);
-    }
+    throw error;
   }
 };
 

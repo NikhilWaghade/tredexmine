@@ -20,7 +20,7 @@ const REFRESH_COOKIE_OPTIONS = {
  */
 export const register = async (req, res, next) => {
   try {
-    const { name, email, password, role, referredBy } = req.body;
+    const { name, email, password, referredBy } = req.body;
 
     // 1. Check if email is already registered
     const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
@@ -42,12 +42,12 @@ export const register = async (req, res, next) => {
       }
     }
 
-    // 3. Create user (password will be hashed via pre-save hook)
+    // 3. Create user (password will be hashed via pre-save hook; role is always strictly 'user')
     const user = await User.create({
       name: name.trim(),
       email: email.toLowerCase().trim(),
       password,
-      role: role || 'user',
+      role: 'user',
       referredBy: verifiedReferredBy,
     });
 

@@ -40,11 +40,20 @@ const transactionSchema = new mongoose.Schema(
       },
       default: 'completed',
     },
+    reference: {
+      type: String,
+      trim: true,
+      sparse: true,
+      index: true,
+    },
   },
   {
     timestamps: true,
   }
 );
+
+// Unique sparse index for idempotent transaction references
+transactionSchema.index({ reference: 1 }, { unique: true, sparse: true });
 
 transactionSchema.set('toJSON', {
   transform: (doc, ret) => {

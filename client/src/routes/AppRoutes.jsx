@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom';
 import { MainLayout } from '../layouts';
 import { HomePage } from '../pages/Home';
+import { PlansPage } from '../pages/Plans';
 import { AboutPage } from '../pages/About';
 import { ContactPage } from '../pages/Contact';
 import { NotFoundPage } from '../pages/NotFound';
@@ -11,6 +12,7 @@ export function AppRoutes() {
     <Routes>
       <Route element={<MainLayout />}>
         <Route path={ROUTES.HOME} element={<HomePage />} />
+        <Route path={ROUTES.PLANS} element={<PlansPage />} />
         <Route path={ROUTES.ABOUT} element={<AboutPage />} />
         <Route path={ROUTES.CONTACT} element={<ContactPage />} />
         <Route path={ROUTES.NOT_FOUND} element={<NotFoundPage />} />
@@ -20,3 +22,4 @@ export function AppRoutes() {
 }
 
 export default AppRoutes;
+

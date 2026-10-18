@@ -28,9 +28,9 @@ export const registerValidation = (req, res, next) => {
     errors.push('Password must be at least 6 characters long');
   }
 
-  // Validate Role (optional, defaults to user)
-  if (role && !['user', 'admin'].includes(role)) {
-    errors.push('Role must be either user or admin');
+  // Reject requests that explicitly contain a role field
+  if (role !== undefined || (req.body && 'role' in req.body)) {
+    errors.push('Role cannot be specified during registration');
   }
 
   // Return validation error response if any rules failed
