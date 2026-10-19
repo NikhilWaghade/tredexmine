@@ -1,6 +1,5 @@
-import dotenv from 'dotenv';
-// Load environment variables before any module imports
-dotenv.config();
+// Preload environment variables before any module resolution
+import 'dotenv/config';
 
 import app from './app.js';
 import { connectDB } from './config/db.js';

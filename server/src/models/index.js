@@ -13,4 +13,7 @@ export { default as Plan } from './Plan.js';
 export * from './UserPlan.js';
 export { default as UserPlan } from './UserPlan.js';
 
+export * from './Payment.js';
+export { default as Payment } from './Payment.js';
+
 

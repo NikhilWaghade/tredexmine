@@ -207,7 +207,16 @@ export const purchasePlan = async (userId, planId, options = {}) => {
  * @returns {Promise<Array<UserPlan>>}
  */
 export const getUserActivePlans = async (userId) => {
-  return UserPlan.find({ user: userId, status: 'active' }).sort({ createdAt: -1 });
+  const now = new Date();
+  return UserPlan.find({
+    user: userId,
+    status: 'active',
+    $or: [
+      { endDate: { $exists: false } },
+      { endDate: null },
+      { endDate: { $gt: now } },
+    ],
+  }).sort({ createdAt: -1 });
 };
 
 /**

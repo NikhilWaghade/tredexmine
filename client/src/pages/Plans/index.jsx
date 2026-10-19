@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { planService } from '../../services';
 import { useAuth } from '../../context';
 import { Container, Button, SectionHeader } from '../../components/common';
+import { ROUTES } from '../../constants';
 import { PlanCard } from './PlanCard';
 import { PlanDetailsModal } from './PlanDetailsModal';
 import { PurchaseConfirmationModal } from './PurchaseConfirmationModal';
@@ -138,6 +140,7 @@ export function PlansPage() {
   const handlePurchaseSuccess = async () => {
     // Refresh both wallet and active plans strictly from server
     await Promise.allSettled([refreshWallet(), reloadActivePlans()]);
+    window.dispatchEvent(new CustomEvent('treadex:refresh'));
   };
 
 
@@ -165,13 +168,24 @@ export function PlansPage() {
                   Available Wallet Balance
                 </span>
                 <span className="text-xl sm:text-2xl font-extrabold text-emerald-400">
-                  ${wallet?.balance != null ? Number(wallet.balance).toFixed(2) : '0.00'}{' '}
-                  <span className="text-xs text-gray-400 font-normal">USD</span>
+                  ₹{wallet?.balance != null ? Number(wallet.balance).toFixed(2) : '0.00'}{' '}
+                  <span className="text-xs text-gray-400 font-normal">INR</span>
                 </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+            <div className="flex items-center gap-2.5 w-full sm:w-auto justify-between sm:justify-end flex-wrap">
+              <Link
+                to={ROUTES.DASHBOARD}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#7A56D6] hover:bg-[#6843c0] text-xs font-semibold text-white shadow-sm shadow-[#7A56D6]/40 transition-colors"
+                title="View full terminal overview and metrics"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                </svg>
+                Dashboard
+              </Link>
+
               <button
                 onClick={refreshWallet}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-gray-300 hover:text-white transition-colors"
