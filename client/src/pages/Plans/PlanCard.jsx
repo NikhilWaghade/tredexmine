@@ -2,13 +2,11 @@ import { Button, Card } from '../../components/common';
 
 export function PlanCard({
   plan,
-  walletBalance,
   isAuthenticated,
   onPurchase,
   onViewDetails,
 }) {
-  const isAffordable = walletBalance != null ? walletBalance >= plan.price : true;
-  const priceFormatted = Number(plan.price).toFixed(2);
+  const priceFormatted = Number(plan.price).toLocaleString('en-IN');
   const dailyRoiPercent = plan.dailyRoiRate ? (plan.dailyRoiRate * 100).toFixed(2) : null;
 
   return (
@@ -51,10 +49,10 @@ export function PlanCard({
         <div className="mt-6 pt-5 border-t border-white/10 flex items-baseline justify-between">
           <div>
             <span className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-              ${priceFormatted}
+              ₹{priceFormatted}
             </span>
             <span className="text-xs text-gray-400 ml-2 font-medium">
-              / {plan.durationDays} Days
+              INR / {plan.durationDays} Days
             </span>
           </div>
 
@@ -111,25 +109,16 @@ export function PlanCard({
         {isAuthenticated ? (
           <Button
             onClick={() => onPurchase(plan)}
-            variant={isAffordable ? 'primary' : 'outline'}
+            variant="primary"
             size="md"
             className="w-full"
           >
-            {isAffordable ? (
-              <span className="flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                Purchase Plan
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 text-amber-300">
-                <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                Insufficient Balance (${priceFormatted})
-              </span>
-            )}
+            <span className="flex items-center justify-center gap-2">
+              <svg className="w-4 h-4 text-purple-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Pay with UPI & Activate
+            </span>
           </Button>
         ) : (
           <Button

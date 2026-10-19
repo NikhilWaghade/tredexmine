@@ -38,6 +38,7 @@ export function AuthProvider({ children }) {
       const data = await walletService.getWallet();
       if (data.success && data.wallet) {
         setWallet(data.wallet);
+        window.dispatchEvent(new CustomEvent('wallet:updated', { detail: data.wallet }));
         return data.wallet;
       }
     } catch (err) {

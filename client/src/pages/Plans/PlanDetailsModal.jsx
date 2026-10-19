@@ -131,7 +131,7 @@ export function PlanDetailsModal({
                   Price
                 </span>
                 <span className="text-lg font-bold text-white">
-                  ${Number(plan.price).toFixed(2)}
+                  ₹{Number(plan.price).toLocaleString('en-IN')}
                 </span>
               </div>
               <div>

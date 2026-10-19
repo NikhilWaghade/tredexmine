@@ -44,7 +44,6 @@ const transactionSchema = new mongoose.Schema(
       type: String,
       trim: true,
       sparse: true,
-      index: true,
     },
   },
   {

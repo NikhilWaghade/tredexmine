@@ -66,10 +66,28 @@ export function Navbar() {
             ))}
           </nav>
 
-          {/* Desktop Right Action */}
+            {/* Desktop Right Action */}
           <div className="hidden md:flex items-center gap-3">
             {isAuthenticated ? (
               <div className="flex items-center gap-3">
+                {/* Dashboard NavLink */}
+                <NavLink
+                  to={ROUTES.DASHBOARD}
+                  className={({ isActive }) =>
+                    cn(
+                      'px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border',
+                      isActive
+                        ? 'bg-[#7A56D6] text-white border-[#7A56D6] shadow-sm shadow-[#7A56D6]/40'
+                        : 'bg-white/5 hover:bg-white/10 text-gray-200 border-white/10 hover:text-white'
+                    )
+                  }
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                  </svg>
+                  <span>Dashboard</span>
+                </NavLink>
+
                 {/* Live Wallet Balance Badge */}
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-purple-950/60 border border-purple-800/40 text-xs">
                   <svg
@@ -87,7 +105,7 @@ export function Navbar() {
                   </svg>
                   <span className="text-gray-400 font-medium">Balance:</span>
                   <span className="font-bold text-emerald-400">
-                    ${wallet?.balance != null ? Number(wallet.balance).toFixed(2) : '0.00'}
+                    ₹{wallet?.balance != null ? Number(wallet.balance).toFixed(2) : '0.00'}
                   </span>
                 </div>
 
@@ -171,10 +189,18 @@ export function Navbar() {
             <div className="mt-4 pt-4 border-t border-white/10 flex flex-col gap-3">
               {isAuthenticated ? (
                 <>
+                  <Link
+                    to={ROUTES.DASHBOARD}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-[#7A56D6] text-white text-sm font-semibold shadow-md shadow-[#7A56D6]/30"
+                  >
+                    <span>Go to Dashboard</span>
+                    <span>→</span>
+                  </Link>
                   <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-purple-950/60 border border-purple-800/40 text-sm">
                     <span className="text-gray-400 font-medium">Wallet Balance:</span>
                     <span className="font-bold text-emerald-400">
-                      ${wallet?.balance != null ? Number(wallet.balance).toFixed(2) : '0.00'}
+                      ₹{wallet?.balance != null ? Number(wallet.balance).toFixed(2) : '0.00'}
                     </span>
                   </div>
                   <div className="text-xs text-gray-400 px-1">
