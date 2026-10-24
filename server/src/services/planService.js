@@ -36,15 +36,48 @@ export const getActivePlanById = async (planId) => {
 };
 
 /**
- * Purchase an active plan using the user's wallet balance
+ * Detects whether multi-document transactions are supported on the current MongoDB connection.
+ * Requires an active connection and a replica set or mongos cluster topology.
+ * Standalone MongoDB ('Single' topology) does not support multi-document transactions.
+ * @returns {boolean}
+ */
+export const isTransactionSupported = () => {
+  if (mongoose.connection?.readyState !== 1) {
+    return false;
+  }
+  const client = mongoose.connection?.client;
+  const topology = client?.topology;
+  if (!topology) {
+    return false;
+  }
+  const descType = topology.description?.type;
+  if (descType === 'Single') {
+    return false;
+  }
+  if (
+    descType === 'ReplicaSetWithPrimary' ||
+    descType === 'Sharded' ||
+    descType === 'LoadBalanced'
+  ) {
+    return true;
+  }
+  return false;
+};
+
+/**
+ * Purchase an active plan using the user's wallet balance.
+ * Requires mandatory idempotency key to prevent duplicate purchases.
+ * Uses atomic multi-document transactions when supported, and robust compensating rollback in fallback mode.
+ *
  * @param {string|mongoose.Types.ObjectId} userId
  * @param {string|mongoose.Types.ObjectId} planId
  * @param {Object} [options]
- * @param {string} [options.idempotencyKey]
+ * @param {string} [options.idempotencyKey] - Mandatory idempotency key
+ * @param {mongoose.ClientSession} [options.session] - Optional pre-existing session
  * @returns {Promise<{ userPlan: UserPlan, walletBalance: number, isIdempotent?: boolean }>}
  */
 export const purchasePlan = async (userId, planId, options = {}) => {
-  const { idempotencyKey } = options;
+  const { idempotencyKey, session: providedSession = null } = options;
 
   // 1. Validate plan ID format
   if (!mongoose.Types.ObjectId.isValid(planId)) {
@@ -53,23 +86,33 @@ export const purchasePlan = async (userId, planId, options = {}) => {
     throw error;
   }
 
-  // 2. Check idempotency if a key is supplied
-  if (idempotencyKey) {
-    const trimmedKey = String(idempotencyKey).trim();
-    if (trimmedKey.length > 0) {
-      const existingUserPlan = await UserPlan.findOne({ user: userId, idempotencyKey: trimmedKey });
-      if (existingUserPlan) {
-        const wallet = await getWalletByUserId(userId);
-        return {
-          userPlan: existingUserPlan,
-          walletBalance: wallet.balance,
-          isIdempotent: true,
-        };
-      }
-    }
+  // 2. Validate user ID format
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    const error = new Error('Invalid user ID format');
+    error.statusCode = 400;
+    throw error;
   }
 
-  // 3. Retrieve active plan
+  // 3. Validate mandatory idempotency key
+  if (
+    idempotencyKey === undefined ||
+    idempotencyKey === null ||
+    typeof idempotencyKey !== 'string' ||
+    idempotencyKey.trim().length === 0
+  ) {
+    const error = new Error('Idempotency key is required for plan purchase');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const trimmedKey = idempotencyKey.trim();
+  if (trimmedKey.length > 255) {
+    const error = new Error('Idempotency key cannot exceed 255 characters');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 4. Retrieve active plan
   const plan = await Plan.findOne({ _id: planId, isActive: true });
   if (!plan) {
     const error = new Error('Plan not found or is currently inactive');
@@ -77,39 +120,74 @@ export const purchasePlan = async (userId, planId, options = {}) => {
     throw error;
   }
 
-  // 4. Ensure user's wallet exists
-  const wallet = await getWalletByUserId(userId);
+  // 5. Pre-check idempotency: if already processed for this user, return immediately without debiting
+  const existingUserPlan = await UserPlan.findOne({ user: userId, idempotencyKey: trimmedKey });
+  if (existingUserPlan) {
+    const wallet = await getWalletByUserId(userId);
+    return {
+      userPlan: existingUserPlan,
+      walletBalance: wallet.balance,
+      isIdempotent: true,
+    };
+  }
 
-  // 5. Pre-check balance
+  // 6. Ensure user's wallet exists and check balance
+  const wallet = await getWalletByUserId(userId);
   if (wallet.balance < plan.price) {
     const error = new Error('Insufficient wallet balance');
     error.statusCode = 400;
     throw error;
   }
 
-  // 6. Check transaction support on the active database connection
-  let session = null;
+  // 7. Check multi-document transaction support on active connection
+  let session = providedSession;
+  let ownSession = false;
   let transactionStarted = false;
 
-  if (mongoose.connection?.readyState === 1) {
+  if (!session && isTransactionSupported()) {
     try {
       session = await mongoose.startSession();
       session.startTransaction();
       transactionStarted = true;
+      ownSession = true;
     } catch (sessionErr) {
-      // Graceful fallback for standalone MongoDB deployments where transactions are not supported
       if (session) {
-        session.endSession();
+        try {
+          await session.endSession();
+        } catch (_) {}
         session = null;
       }
       transactionStarted = false;
+      ownSession = false;
     }
+  } else if (session) {
+    transactionStarted = true;
   }
+
+  let walletDebited = false;
+  let createdUserPlan = null;
+  let createdTransaction = null;
 
   try {
     const sessionOpt = transactionStarted && session ? { session } : {};
 
-    // 7. Atomically deduct wallet balance with precondition check (balance >= plan.price)
+    // In transaction mode, re-verify idempotency within the session snapshot
+    if (transactionStarted && session) {
+      const txExisting = await UserPlan.findOne({ user: userId, idempotencyKey: trimmedKey }).session(session);
+      if (txExisting) {
+        if (ownSession) {
+          await session.commitTransaction();
+        }
+        const currentWallet = await getWalletByUserId(userId);
+        return {
+          userPlan: txExisting,
+          walletBalance: currentWallet.balance,
+          isIdempotent: true,
+        };
+      }
+    }
+
+    // 8. Atomically deduct wallet balance with precondition check (balance >= plan.price)
     const updatedWallet = await Wallet.findOneAndUpdate(
       { user: userId, balance: { $gte: plan.price } },
       { $inc: { balance: -plan.price } },
@@ -117,20 +195,39 @@ export const purchasePlan = async (userId, planId, options = {}) => {
     );
 
     if (!updatedWallet) {
-      if (transactionStarted && session) {
+      if (ownSession && transactionStarted && session) {
         await session.abortTransaction();
       }
+
+      // Check if a concurrent request with the same idempotency key already debited the balance and activated the plan
+      let existingConcurrent = await UserPlan.findOne({ user: userId, idempotencyKey: trimmedKey });
+      if (!existingConcurrent) {
+        for (let attempt = 0; attempt < 5 && !existingConcurrent; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          existingConcurrent = await UserPlan.findOne({ user: userId, idempotencyKey: trimmedKey });
+        }
+      }
+      if (existingConcurrent) {
+        const currentWallet = await getWalletByUserId(userId);
+        return {
+          userPlan: existingConcurrent,
+          walletBalance: currentWallet.balance,
+          isIdempotent: true,
+        };
+      }
+
       const error = new Error('Insufficient wallet balance');
       error.statusCode = 400;
       throw error;
     }
+    walletDebited = true;
 
-    // 8. Calculate subscription dates
+    // 9. Calculate subscription dates
     const startDate = new Date();
     const durationMs = plan.durationDays * 24 * 60 * 60 * 1000;
     const endDate = new Date(startDate.getTime() + durationMs);
 
-    // 9. Create UserPlan record snapshot
+    // 10. Create UserPlan record snapshot
     const userPlanData = {
       user: userId,
       plan: plan._id,
@@ -143,18 +240,27 @@ export const purchasePlan = async (userId, planId, options = {}) => {
       startDate,
       endDate,
       status: 'active',
-      ...(idempotencyKey ? { idempotencyKey: String(idempotencyKey).trim() } : {}),
+      idempotencyKey: trimmedKey,
     };
 
-    let userPlan;
     if (transactionStarted && session) {
       const createdPlans = await UserPlan.create([userPlanData], { session });
-      userPlan = createdPlans[0];
+      createdUserPlan = Array.isArray(createdPlans) ? createdPlans[0] : createdPlans;
     } else {
-      userPlan = await UserPlan.create(userPlanData);
+      const created = await UserPlan.create(userPlanData);
+      createdUserPlan = Array.isArray(created) ? created[0] : created;
     }
 
-    // 10. Create matching debit Transaction record
+    // 11. Create matching debit Transaction record referencing the created UserPlan with balance snapshots
+    const userPlanRef = createdUserPlan?._id
+      ? createdUserPlan._id.toString()
+      : createdUserPlan?.id
+      ? createdUserPlan.id.toString()
+      : trimmedKey;
+
+    const balanceAfter = updatedWallet.balance;
+    const balanceBefore = Math.round((updatedWallet.balance + plan.price) * 100) / 100;
+
     const transactionData = {
       user: userId,
       wallet: updatedWallet._id,
@@ -162,41 +268,104 @@ export const purchasePlan = async (userId, planId, options = {}) => {
       amount: plan.price,
       description: `Plan Purchase: ${plan.name}`,
       status: 'completed',
+      reference: userPlanRef,
+      balanceBefore,
+      balanceAfter,
     };
 
     if (transactionStarted && session) {
-      await Transaction.create([transactionData], { session });
-      await session.commitTransaction();
-    } else {
-      // Compensating write rollback for deployments without multi-document transaction support
-      try {
-        await Transaction.create(transactionData);
-      } catch (txError) {
-        await Wallet.findOneAndUpdate({ user: userId }, { $inc: { balance: plan.price } });
-        if (userPlan?._id) {
-          await UserPlan.findByIdAndDelete(userPlan._id);
-        }
-        throw txError;
+      const createdTxs = await Transaction.create([transactionData], { session });
+      createdTransaction = Array.isArray(createdTxs) ? createdTxs[0] : createdTxs;
+      if (ownSession) {
+        await session.commitTransaction();
       }
+    } else {
+      const created = await Transaction.create(transactionData);
+      createdTransaction = Array.isArray(created) ? created[0] : created;
     }
 
     return {
-      userPlan,
+      userPlan: createdUserPlan,
       walletBalance: updatedWallet.balance,
+      transaction: createdTransaction,
       isIdempotent: false,
     };
   } catch (error) {
-    if (transactionStarted && session) {
+    // 1. Transaction mode rollback: cleanly rewinds all session writes without manual compensating refund
+    if (ownSession && transactionStarted && session) {
       try {
         await session.abortTransaction();
-      } catch (abortErr) {
-        // Ignore abort error if already aborted
+      } catch (_) {
+        // Ignore abort error if already aborted or connection closed
       }
     }
+
+    // 2. Fallback mode compensating rollback:
+    // Only if multi-document transaction was NOT active and the wallet was actually debited
+    if (!transactionStarted && walletDebited) {
+      try {
+        await Wallet.findOneAndUpdate({ user: userId }, { $inc: { balance: plan.price } });
+        walletDebited = false; // Mark refunded to prevent any subsequent double refund
+      } catch (refundErr) {
+        console.error('[PlanService] Failed to refund wallet balance:', refundErr.message);
+      }
+
+      if (createdUserPlan?._id) {
+        try {
+          if (mongoose.connection?.readyState === 1 || Object.prototype.hasOwnProperty.call(UserPlan, 'findByIdAndDelete')) {
+            await UserPlan.findByIdAndDelete(createdUserPlan._id);
+          }
+          createdUserPlan = null;
+        } catch (deleteErr) {
+          console.error('[PlanService] Failed to delete orphaned UserPlan:', deleteErr.message);
+        }
+      }
+
+      if (createdTransaction?._id) {
+        try {
+          if (mongoose.connection?.readyState === 1 || Object.prototype.hasOwnProperty.call(Transaction, 'findByIdAndDelete')) {
+            await Transaction.findByIdAndDelete(createdTransaction._id);
+          }
+          createdTransaction = null;
+        } catch (deleteErr) {
+          console.error('[PlanService] Failed to delete orphaned Transaction:', deleteErr.message);
+        }
+      }
+    }
+
+    // 3. Handle concurrent duplicate key collisions and transaction write conflicts gracefully
+    const isDuplicateKey =
+      error.code === 11000 ||
+      (typeof error.message === 'string' && error.message.includes('11000')) ||
+      (typeof error.hasErrorLabel === 'function' && error.hasErrorLabel('TransientTransactionError')) ||
+      error.code === 112; // WriteConflict
+
+    if (isDuplicateKey) {
+      let existing = await UserPlan.findOne({ user: userId, idempotencyKey: trimmedKey });
+      if (!existing) {
+        for (let attempt = 0; attempt < 5 && !existing; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          existing = await UserPlan.findOne({ user: userId, idempotencyKey: trimmedKey });
+        }
+      }
+      if (existing) {
+        const currentWallet = await getWalletByUserId(userId);
+        return {
+          userPlan: existing,
+          walletBalance: currentWallet.balance,
+          isIdempotent: true,
+        };
+      }
+    }
+
     throw error;
   } finally {
-    if (session) {
-      session.endSession();
+    if (ownSession && session) {
+      try {
+        await session.endSession();
+      } catch (_) {
+        // Ignore session cleanup error
+      }
     }
   }
 };
@@ -255,10 +424,119 @@ export const createPlan = async (planData) => {
   return plan;
 };
 
+/**
+ * Get all plans including inactive ones (Administrator only)
+ * @returns {Promise<Array<Plan>>}
+ */
+export const getAllPlansAdmin = async () => {
+  return Plan.find({}).sort({ sortOrder: 1, createdAt: 1 });
+};
+
+/**
+ * Get any plan by ID, regardless of active status (Administrator only)
+ * @param {string|mongoose.Types.ObjectId} planId
+ * @returns {Promise<Plan>}
+ */
+export const getPlanByIdAdmin = async (planId) => {
+  if (!mongoose.Types.ObjectId.isValid(planId)) {
+    const error = new Error('Invalid plan ID format');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const plan = await Plan.findById(planId);
+  if (!plan) {
+    const error = new Error('Plan not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return plan;
+};
+
+/**
+ * Update an existing plan's editable fields (Administrator only)
+ * Existing user purchases and transactions remain untouched as immutable snapshots
+ * @param {string|mongoose.Types.ObjectId} planId
+ * @param {Object} updateData
+ * @returns {Promise<Plan>}
+ */
+export const updatePlan = async (planId, updateData) => {
+  if (!mongoose.Types.ObjectId.isValid(planId)) {
+    const error = new Error('Invalid plan ID format');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const plan = await Plan.findById(planId);
+  if (!plan) {
+    const error = new Error('Plan not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const {
+    name,
+    tag,
+    description,
+    price,
+    durationDays,
+    dailyRoiRate,
+    hashRate,
+    features,
+    isActive,
+    sortOrder,
+  } = updateData;
+
+  if (name !== undefined) plan.name = name.trim();
+  if (tag !== undefined) plan.tag = String(tag).trim();
+  if (description !== undefined) plan.description = String(description).trim();
+  if (price !== undefined) plan.price = price;
+  if (durationDays !== undefined) plan.durationDays = durationDays;
+  if (dailyRoiRate !== undefined) plan.dailyRoiRate = dailyRoiRate;
+  if (hashRate !== undefined) plan.hashRate = String(hashRate).trim();
+  if (features !== undefined) plan.features = Array.isArray(features) ? features : [];
+  if (isActive !== undefined) plan.isActive = Boolean(isActive);
+  if (sortOrder !== undefined) plan.sortOrder = sortOrder;
+
+  await plan.save();
+  return plan;
+};
+
+/**
+ * Toggle or explicitly set active status of a plan (Administrator only)
+ * @param {string|mongoose.Types.ObjectId} planId
+ * @param {boolean} [targetStatus]
+ * @returns {Promise<Plan>}
+ */
+export const togglePlanStatus = async (planId, targetStatus) => {
+  if (!mongoose.Types.ObjectId.isValid(planId)) {
+    const error = new Error('Invalid plan ID format');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const plan = await Plan.findById(planId);
+  if (!plan) {
+    const error = new Error('Plan not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  plan.isActive = typeof targetStatus === 'boolean' ? targetStatus : !plan.isActive;
+  await plan.save();
+  return plan;
+};
+
 export default {
+  isTransactionSupported,
   getActivePlans,
   getActivePlanById,
   purchasePlan,
   getUserActivePlans,
   createPlan,
+  getAllPlansAdmin,
+  getPlanByIdAdmin,
+  updatePlan,
+  togglePlanStatus,
 };

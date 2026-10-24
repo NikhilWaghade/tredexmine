@@ -110,7 +110,7 @@ export const getUserDashboard = async (userId) => {
   const recentTransactions = await Transaction.find({ user: userId })
     .sort({ createdAt: -1 })
     .limit(10)
-    .select('_id type amount description status reference createdAt');
+    .select('_id type amount description status reference balanceBefore balanceAfter createdAt');
 
   return {
     user: {
@@ -139,6 +139,8 @@ export const getUserDashboard = async (userId) => {
       description: tx.description,
       status: tx.status,
       reference: tx.reference,
+      ...(tx.balanceBefore != null ? { balanceBefore: tx.balanceBefore } : {}),
+      ...(tx.balanceAfter != null ? { balanceAfter: tx.balanceAfter } : {}),
       date: tx.createdAt,
     })),
   };

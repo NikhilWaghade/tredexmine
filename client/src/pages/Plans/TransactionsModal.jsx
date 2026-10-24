@@ -141,9 +141,25 @@ export function TransactionsModal({ isOpen, onClose }) {
                         <span className="font-semibold text-white block">
                           {tx.description || (isDebit ? 'Plan Purchase' : 'Deposit')}
                         </span>
-                        <span className="text-gray-400 text-[11px]">
-                          {createdDate.toLocaleString()}
-                        </span>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-400">
+                          <span>{createdDate.toLocaleString()}</span>
+                          {tx.reference && (
+                            <span
+                              className="text-gray-500 font-mono text-[10px]"
+                              title={`Reference: ${tx.reference}`}
+                            >
+                              Ref: {tx.reference.length > 12 ? `${tx.reference.substring(0, 10)}...` : tx.reference}
+                            </span>
+                          )}
+                          {tx.balanceAfter != null && (
+                            <span
+                              className="text-gray-500 font-mono text-[10px]"
+                              title={`Balance after transaction: ₹${tx.balanceAfter}`}
+                            >
+                              Bal: ₹{Number(tx.balanceAfter).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -153,7 +169,7 @@ export function TransactionsModal({ isOpen, onClose }) {
                           isDebit ? 'text-rose-400' : 'text-emerald-400'
                         }`}
                       >
-                        {isDebit ? '-' : '+'}${Number(tx.amount).toFixed(2)}
+                        {isDebit ? '-' : '+'}₹{Number(tx.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                       <span className="text-[10px] uppercase font-semibold text-gray-500">
                         {tx.status}

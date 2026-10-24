@@ -5,6 +5,10 @@ import {
   purchasePlan as purchasePlanService,
   getUserActivePlans,
   createPlan as createPlanService,
+  getAllPlansAdmin,
+  getPlanByIdAdmin,
+  updatePlan as updatePlanService,
+  togglePlanStatus as togglePlanStatusService,
 } from '../services/planService.js';
 
 /**
@@ -67,7 +71,7 @@ export const purchasePlan = async (req, res, next) => {
     const { id } = req.params;
     const userId = req.user._id;
 
-    // Read optional idempotency key from header or body
+    // Read mandatory idempotency key from header or body
     const idempotencyKey =
       req.headers['idempotency-key'] ||
       req.headers['x-idempotency-key'] ||
@@ -86,6 +90,7 @@ export const purchasePlan = async (req, res, next) => {
       data: {
         userPlan: result.userPlan,
         walletBalance: result.walletBalance,
+        ...(result.transaction ? { transaction: result.transaction } : {}),
       },
     });
   } catch (error) {
@@ -152,10 +157,154 @@ export const createPlan = async (req, res, next) => {
   }
 };
 
+/**
+ * Get all plans including inactive ones (Administrator only)
+ * @route GET /api/v1/plans/admin/all
+ */
+export const getAdminPlans = async (req, res, next) => {
+  try {
+    const plans = await getAllPlansAdmin();
+
+    return res.status(200).json({
+      success: true,
+      count: plans.length,
+      plans,
+      data: plans,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get any plan by ID, regardless of active status (Administrator only)
+ * @route GET /api/v1/plans/admin/:id
+ */
+export const getAdminPlanById = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid plan ID format',
+      });
+    }
+
+    const plan = await getPlanByIdAdmin(id);
+
+    return res.status(200).json({
+      success: true,
+      plan,
+      data: {
+        plan,
+      },
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    next(error);
+  }
+};
+
+/**
+ * Update an existing plan (Administrator only)
+ * @route PUT /api/v1/plans/:id
+ */
+export const updatePlan = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid plan ID format',
+      });
+    }
+
+    const plan = await updatePlanService(id, req.body);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Plan updated successfully',
+      plan,
+      data: {
+        plan,
+      },
+    });
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    next(error);
+  }
+};
+
+/**
+ * Toggle or set plan active status (Administrator only)
+ * @route PATCH /api/v1/plans/:id/status
+ */
+export const togglePlanStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid plan ID format',
+      });
+    }
+
+    if (isActive !== undefined && typeof isActive !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'isActive must be a boolean',
+      });
+    }
+
+    const plan = await togglePlanStatusService(id, isActive);
+
+    return res.status(200).json({
+      success: true,
+      message: `Plan ${plan.isActive ? 'activated' : 'deactivated'} successfully`,
+      plan,
+      data: {
+        plan,
+      },
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    next(error);
+  }
+};
+
 export default {
   getPlans,
   getPlanById,
   purchasePlan,
   getMyActivePlans,
   createPlan,
+  getAdminPlans,
+  getAdminPlanById,
+  updatePlan,
+  togglePlanStatus,
 };

@@ -1,4 +1,4 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -15,6 +15,7 @@ import {
   verifyPaymentSignature,
   verifyWebhookSignature,
   setRazorpayInstance,
+  isRazorpayConfigured,
 } from '../src/config/razorpay.js';
 import * as paymentService from '../src/services/paymentService.js';
 
@@ -821,6 +822,7 @@ describe('Payment & UPI Gateway Integration Tests', () => {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${validUserToken}`,
+            'Idempotency-Key': 'payment-test-key-1',
           },
           body: JSON.stringify({}),
         });
@@ -838,6 +840,302 @@ describe('Payment & UPI Gateway Integration Tests', () => {
         UserPlan.create = origUserPlanCreate;
         Transaction.create = origTxCreate;
       }
+    });
+  });
+
+  describe('Payment Order Status Endpoint (GET /api/v1/payments/order/:orderId)', () => {
+    it('rejects unauthenticated request with 401', async () => {
+      const res = await fetch(`${baseUrl}/api/v1/payments/order/order_any_123`);
+      assert.strictEqual(res.status, 401);
+    });
+
+    it('returns 404 when querying an order belonging to another user (user data isolation)', async () => {
+      const origUserFindById = User.findById;
+      const origPaymentFindOne = Payment.findOne;
+
+      User.findById = () => ({
+        select: () => Promise.resolve(mockOtherUser),
+      });
+
+      Payment.findOne = (query) => {
+        if (query.orderId === 'order_secret_123' && query.user.toString() === mockUserId.toString()) {
+          return { populate: () => ({ populate: () => Promise.resolve({ orderId: 'order_secret_123', user: mockUserId }) }) };
+        }
+        return { populate: () => ({ populate: () => Promise.resolve(null) }) };
+      };
+
+      try {
+        const res = await fetch(`${baseUrl}/api/v1/payments/order/order_secret_123`, {
+          headers: { Authorization: `Bearer ${otherUserToken}` },
+        });
+
+        assert.strictEqual(res.status, 404);
+        const data = await res.json();
+        assert.strictEqual(data.success, false);
+        assert.match(data.message, /Payment record not found/);
+      } finally {
+        User.findById = origUserFindById;
+        Payment.findOne = origPaymentFindOne;
+      }
+    });
+
+    it('returns payment details when queried by the owning user', async () => {
+      const origUserFindById = User.findById;
+      const origPaymentFindOne = Payment.findOne;
+
+      User.findById = () => ({
+        select: () => Promise.resolve(mockUser),
+      });
+
+      const mockPayment = {
+        _id: new mongoose.Types.ObjectId(),
+        orderId: 'order_owner_123',
+        user: mockUserId,
+        amount: 500,
+        status: 'captured',
+        plan: { name: 'Basic Plus', price: 500 },
+      };
+
+      Payment.findOne = (query) => {
+        if (query.orderId === 'order_owner_123' && query.user.toString() === mockUserId.toString()) {
+          return { populate: () => ({ populate: () => Promise.resolve(mockPayment) }) };
+        }
+        return { populate: () => ({ populate: () => Promise.resolve(null) }) };
+      };
+
+      try {
+        const res = await fetch(`${baseUrl}/api/v1/payments/order/order_owner_123`, {
+          headers: { Authorization: `Bearer ${validUserToken}` },
+        });
+
+        assert.strictEqual(res.status, 200);
+        const data = await res.json();
+        assert.strictEqual(data.success, true);
+        assert.strictEqual(data.data.payment.orderId, 'order_owner_123');
+        assert.strictEqual(data.data.payment.amount, 500);
+      } finally {
+        User.findById = origUserFindById;
+        Payment.findOne = origPaymentFindOne;
+      }
+    });
+  });
+
+  describe('Gateway Configuration Gating & Credential Security Tests', () => {
+    const origKeyId = process.env.RAZORPAY_KEY_ID;
+    const origKeySecret = process.env.RAZORPAY_KEY_SECRET;
+    const origWebhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+
+    afterEach(() => {
+      process.env.RAZORPAY_KEY_ID = origKeyId;
+      process.env.RAZORPAY_KEY_SECRET = origKeySecret;
+      process.env.RAZORPAY_WEBHOOK_SECRET = origWebhookSecret;
+    });
+
+    describe('isRazorpayConfigured() Helper', () => {
+      it('returns false when RAZORPAY_KEY_ID contains placeholder', () => {
+        process.env.RAZORPAY_KEY_ID = 'rzp_test_placeholder';
+        process.env.RAZORPAY_KEY_SECRET = 'valid_secret_123';
+        assert.strictEqual(isRazorpayConfigured(), false);
+      });
+
+      it('returns false when RAZORPAY_KEY_SECRET contains placeholder', () => {
+        process.env.RAZORPAY_KEY_ID = 'rzp_test_valid_key';
+        process.env.RAZORPAY_KEY_SECRET = 'rzp_test_secret_placeholder';
+        assert.strictEqual(isRazorpayConfigured(), false);
+      });
+
+      it('returns false when credentials contain "your_" or "dummy"', () => {
+        process.env.RAZORPAY_KEY_ID = 'your_razorpay_key';
+        process.env.RAZORPAY_KEY_SECRET = 'your_razorpay_secret';
+        assert.strictEqual(isRazorpayConfigured(), false);
+
+        process.env.RAZORPAY_KEY_ID = 'dummy_key';
+        process.env.RAZORPAY_KEY_SECRET = 'dummy_secret';
+        assert.strictEqual(isRazorpayConfigured(), false);
+      });
+
+      it('returns false when credentials are empty, missing, or whitespace', () => {
+        delete process.env.RAZORPAY_KEY_ID;
+        assert.strictEqual(isRazorpayConfigured(), false);
+
+        process.env.RAZORPAY_KEY_ID = '   ';
+        assert.strictEqual(isRazorpayConfigured(), false);
+
+        process.env.RAZORPAY_KEY_ID = 'rzp_test_mock_key';
+        delete process.env.RAZORPAY_KEY_SECRET;
+        assert.strictEqual(isRazorpayConfigured(), false);
+      });
+
+      it('returns true when valid non-placeholder sandbox credentials are set', () => {
+        process.env.RAZORPAY_KEY_ID = 'rzp_test_mock_valid_123';
+        process.env.RAZORPAY_KEY_SECRET = 'mock_valid_secret_456';
+        assert.strictEqual(isRazorpayConfigured(), true);
+      });
+    });
+
+    describe('GET /api/v1/payments/config Endpoint', () => {
+      it('rejects unauthenticated request with 401', async () => {
+        const res = await fetch(`${baseUrl}/api/v1/payments/config`);
+        assert.strictEqual(res.status, 401);
+      });
+
+      it('returns isConfigured: true and public key when sandbox credentials are valid', async () => {
+        process.env.RAZORPAY_KEY_ID = 'rzp_test_valid_key_999';
+        process.env.RAZORPAY_KEY_SECRET = 'mock_secret_key_888';
+
+        const origUserFindById = User.findById;
+        User.findById = () => ({
+          select: () => Promise.resolve(mockUser),
+        });
+
+        try {
+          const res = await fetch(`${baseUrl}/api/v1/payments/config`, {
+            headers: { Authorization: `Bearer ${validUserToken}` },
+          });
+          assert.strictEqual(res.status, 200);
+          const data = await res.json();
+          assert.strictEqual(data.success, true);
+          assert.strictEqual(data.data.isConfigured, true);
+          assert.strictEqual(data.data.keyId, 'rzp_test_valid_key_999');
+          assert.strictEqual(data.data.currency, 'INR');
+          assert.strictEqual(data.data.isSandbox, true);
+
+          // Security assertion: Never leak secret keys or webhook secrets
+          assert.strictEqual(data.data.secret, undefined);
+          assert.strictEqual(data.data.keySecret, undefined);
+          assert.strictEqual(data.data.webhookSecret, undefined);
+          assert.strictEqual(JSON.stringify(data).includes('mock_secret_key_888'), false);
+        } finally {
+          User.findById = origUserFindById;
+        }
+      });
+
+      it('returns isConfigured: false and empty keyId when placeholder credentials are set', async () => {
+        process.env.RAZORPAY_KEY_ID = 'rzp_test_placeholder';
+        process.env.RAZORPAY_KEY_SECRET = 'rzp_test_secret_placeholder';
+
+        const origUserFindById = User.findById;
+        User.findById = () => ({
+          select: () => Promise.resolve(mockUser),
+        });
+
+        try {
+          const res = await fetch(`${baseUrl}/api/v1/payments/config`, {
+            headers: { Authorization: `Bearer ${validUserToken}` },
+          });
+          assert.strictEqual(res.status, 200);
+          const data = await res.json();
+          assert.strictEqual(data.success, true);
+          assert.strictEqual(data.data.isConfigured, false);
+          assert.strictEqual(data.data.keyId, '');
+          assert.strictEqual(data.data.currency, 'INR');
+
+          // Security check
+          assert.strictEqual(JSON.stringify(data).includes('placeholder'), false);
+          assert.strictEqual(data.data.secret, undefined);
+        } finally {
+          User.findById = origUserFindById;
+        }
+      });
+
+      it('returns isConfigured: false when credentials are completely missing', async () => {
+        delete process.env.RAZORPAY_KEY_ID;
+        delete process.env.RAZORPAY_KEY_SECRET;
+
+        const origUserFindById = User.findById;
+        User.findById = () => ({
+          select: () => Promise.resolve(mockUser),
+        });
+
+        try {
+          const res = await fetch(`${baseUrl}/api/v1/payments/config`, {
+            headers: { Authorization: `Bearer ${validUserToken}` },
+          });
+          assert.strictEqual(res.status, 200);
+          const data = await res.json();
+          assert.strictEqual(data.success, true);
+          assert.strictEqual(data.data.isConfigured, false);
+          assert.strictEqual(data.data.keyId, '');
+        } finally {
+          User.findById = origUserFindById;
+        }
+      });
+    });
+
+    describe('Order Creation Configuration Gating (POST /api/v1/payments/create-order)', () => {
+      it('rejects create-order with 503 and does NOT create Payment record when gateway uses placeholder credentials', async () => {
+        process.env.RAZORPAY_KEY_ID = 'rzp_test_placeholder';
+        process.env.RAZORPAY_KEY_SECRET = 'rzp_test_secret_placeholder';
+
+        const origUserFindById = User.findById;
+        User.findById = () => ({
+          select: () => Promise.resolve(mockUser),
+        });
+
+        let paymentCreateCalled = false;
+        const origPaymentCreate = Payment.create;
+        Payment.create = async () => {
+          paymentCreateCalled = true;
+          throw new Error('Payment.create must NEVER be invoked when gateway is unconfigured!');
+        };
+
+        try {
+          const res = await fetch(`${baseUrl}/api/v1/payments/create-order`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${validUserToken}`,
+            },
+            body: JSON.stringify({ planId: mockPlanId.toString() }),
+          });
+
+          assert.strictEqual(res.status, 503);
+          const data = await res.json();
+          assert.strictEqual(data.success, false);
+          assert.match(data.message, /unconfigured or disabled/i);
+          assert.strictEqual(paymentCreateCalled, false);
+        } finally {
+          User.findById = origUserFindById;
+          Payment.create = origPaymentCreate;
+        }
+      });
+
+      it('rejects create-order with 503 and does NOT create Payment record when credentials are missing', async () => {
+        delete process.env.RAZORPAY_KEY_ID;
+        delete process.env.RAZORPAY_KEY_SECRET;
+
+        const origUserFindById = User.findById;
+        User.findById = () => ({
+          select: () => Promise.resolve(mockUser),
+        });
+
+        let paymentCreateCalled = false;
+        const origPaymentCreate = Payment.create;
+        Payment.create = async () => {
+          paymentCreateCalled = true;
+          throw new Error('Payment.create should never be called when credentials are missing');
+        };
+
+        try {
+          const res = await fetch(`${baseUrl}/api/v1/payments/create-order`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${validUserToken}`,
+            },
+            body: JSON.stringify({ planId: mockPlanId.toString() }),
+          });
+
+          assert.strictEqual(res.status, 503);
+          const data = await res.json();
+          assert.strictEqual(data.success, false);
+          assert.match(data.message, /unconfigured or disabled/i);
+          assert.strictEqual(paymentCreateCalled, false);
+        } finally {
+          User.findById = origUserFindById;
+          Payment.create = origPaymentCreate;
+        }
+      });
     });
   });
 });

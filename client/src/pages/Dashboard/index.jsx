@@ -530,7 +530,12 @@ export function DashboardPage() {
                             </span>
                           </td>
                           <td className="py-3.5 px-4 max-w-xs truncate text-white">
-                            {tx.description || 'General Account Transaction'}
+                            <div>{tx.description || 'General Account Transaction'}</div>
+                            {tx.reference && (
+                              <div className="text-[10px] text-gray-500 font-mono mt-0.5" title={`Reference: ${tx.reference}`}>
+                                Ref: {tx.reference.length > 14 ? `${tx.reference.substring(0, 12)}...` : tx.reference}
+                              </div>
+                            )}
                           </td>
                           <td
                             className={`py-3.5 px-4 whitespace-nowrap text-right font-bold ${

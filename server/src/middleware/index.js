@@ -4,3 +4,5 @@ export * from './protect.js';
 export { default as protect } from './protect.js';
 export * from './authorize.js';
 export { default as authorize } from './authorize.js';
+export * from './devProvisionGuard.js';
+export { default as devProvisionGuard } from './devProvisionGuard.js';

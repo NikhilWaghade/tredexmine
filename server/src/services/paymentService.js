@@ -22,14 +22,28 @@ import {
  * @returns {Promise<Object>} Gateway order details and public configuration
  */
 export const createPaymentOrder = async (userId, planId) => {
-  // 1. Validate plan ID format
+  // 1. Enforce gateway configuration gating before any processing or DB mutations
+  if (!isRazorpayConfigured()) {
+    const error = new Error('Payment gateway is currently unconfigured or disabled');
+    error.statusCode = 503;
+    throw error;
+  }
+
+  const razorpay = getRazorpayInstance();
+  if (!razorpay) {
+    const error = new Error('Payment gateway client could not be initialized');
+    error.statusCode = 503;
+    throw error;
+  }
+
+  // 2. Validate plan ID format
   if (!mongoose.Types.ObjectId.isValid(planId)) {
     const error = new Error('Invalid plan ID format');
     error.statusCode = 400;
     throw error;
   }
 
-  // 2. Fetch authoritative active plan from MongoDB (never trust client-supplied amounts)
+  // 3. Fetch authoritative active plan from MongoDB (never trust client-supplied amounts)
   const plan = await Plan.findOne({ _id: planId, isActive: true });
   if (!plan) {
     const error = new Error('Plan not found or is currently inactive');
@@ -37,39 +51,32 @@ export const createPaymentOrder = async (userId, planId) => {
     throw error;
   }
 
-  // 3. Convert INR price to paise accurately (1 INR = 100 paise)
+  // 4. Convert INR price to paise accurately (1 INR = 100 paise)
   const amountInPaise = Math.round(plan.price * 100);
   const receipt = `rcpt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
-  // 4. Create gateway order via Razorpay API (or test simulation if in sandbox/offline test mode)
+  // 5. Create gateway order via Razorpay API
   let gatewayOrderId;
-  const razorpay = getRazorpayInstance();
-
-  if (razorpay && isRazorpayConfigured()) {
-    try {
-      const rzpOrder = await razorpay.orders.create({
-        amount: amountInPaise,
-        currency: 'INR',
-        receipt,
-        notes: {
-          userId: userId.toString(),
-          planId: plan._id.toString(),
-          planName: plan.name,
-        },
-      });
-      gatewayOrderId = rzpOrder.id;
-    } catch (gatewayError) {
-      console.error('[PaymentService] Razorpay order creation failed:', gatewayError.message);
-      const error = new Error(`Payment gateway order creation failed: ${gatewayError.message}`);
-      error.statusCode = 502;
-      throw error;
-    }
-  } else {
-    // Sandbox / Test fallback when actual credentials are placeholders
-    gatewayOrderId = `order_test_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  try {
+    const rzpOrder = await razorpay.orders.create({
+      amount: amountInPaise,
+      currency: 'INR',
+      receipt,
+      notes: {
+        userId: userId.toString(),
+        planId: plan._id.toString(),
+        planName: plan.name,
+      },
+    });
+    gatewayOrderId = rzpOrder.id;
+  } catch (gatewayError) {
+    console.error('[PaymentService] Razorpay order creation failed:', gatewayError.message);
+    const error = new Error(`Payment gateway order creation failed: ${gatewayError.message}`);
+    error.statusCode = 502;
+    throw error;
   }
 
-  // 5. Persist payment audit record with status 'created'
+  // 6. Persist payment audit record with status 'created' ONLY after successful gateway order creation
   const payment = await Payment.create({
     user: userId,
     plan: plan._id,
@@ -95,7 +102,7 @@ export const createPaymentOrder = async (userId, planId) => {
     amount: payment.amount,
     amountInPaise: payment.amountInPaise,
     currency: payment.currency,
-    keyId: process.env.RAZORPAY_KEY_ID || '',
+    keyId: isRazorpayConfigured() && process.env.RAZORPAY_KEY_ID ? String(process.env.RAZORPAY_KEY_ID).trim() : '',
     plan: {
       id: plan._id,
       name: plan.name,
@@ -355,13 +362,19 @@ export const getPaymentStatus = async (orderId, userId) => {
 
 /**
  * Fetch public payment configuration
- * @returns {Object} Public configuration (Public Key ID only, never secret)
+ * Returns explicit isConfigured boolean and public Key ID (never secrets)
+ * @returns {Object} Public configuration
  */
 export const getPaymentConfig = () => {
+  const isConfigured = isRazorpayConfigured();
   return {
-    keyId: process.env.RAZORPAY_KEY_ID || '',
+    isConfigured,
+    keyId: isConfigured && process.env.RAZORPAY_KEY_ID ? String(process.env.RAZORPAY_KEY_ID).trim() : '',
     currency: 'INR',
-    isSandbox: !process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID.startsWith('rzp_test_'),
+    isSandbox: Boolean(
+      process.env.RAZORPAY_KEY_ID &&
+        String(process.env.RAZORPAY_KEY_ID).trim().startsWith('rzp_test_')
+    ),
   };
 };
 

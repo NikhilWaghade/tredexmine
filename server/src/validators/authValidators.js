@@ -76,7 +76,47 @@ export const loginValidation = (req, res, next) => {
   next();
 };
 
+/**
+ * Middleware validator for development admin provisioning requests
+ */
+export const devAdminProvisionValidation = (req, res, next) => {
+  const { name, email, password } = req.body || {};
+  const errors = [];
+
+  // Validate Name
+  if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    errors.push('Name is required');
+  } else if (name.trim().length < 2 || name.trim().length > 60) {
+    errors.push('Name must be between 2 and 60 characters');
+  }
+
+  // Validate Email
+  if (!email || typeof email !== 'string' || email.trim().length === 0) {
+    errors.push('Email is required');
+  } else if (!validator.isEmail(email.trim())) {
+    errors.push('Please provide a valid email address');
+  }
+
+  // Validate Password (require minimum 8 characters for admin)
+  if (!password || typeof password !== 'string') {
+    errors.push('Password is required');
+  } else if (password.length < 8) {
+    errors.push('Admin password must be at least 8 characters long');
+  }
+
+  if (errors.length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors,
+    });
+  }
+
+  next();
+};
+
 export default {
   registerValidation,
   loginValidation,
+  devAdminProvisionValidation,
 };
