@@ -158,7 +158,7 @@ export function AdminCreatePlanModal({ isOpen, onClose, onSuccess }) {
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block font-semibold uppercase text-gray-300 mb-1">
-                Price ($) *
+                Price (₹) *
               </label>
               <input
                 type="number"

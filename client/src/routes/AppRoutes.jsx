@@ -7,6 +7,7 @@ import { DashboardPage } from '../pages/Dashboard';
 import { AboutPage } from '../pages/About';
 import { ContactPage } from '../pages/Contact';
 import { NotFoundPage } from '../pages/NotFound';
+import { AdminPlansPage } from '../pages/Admin';
 import { ProtectedRoute } from '../components/auth';
 import { useAuth } from '../context';
 import { ROUTES } from '../constants';
@@ -32,6 +33,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute>
               <DashboardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path={ROUTES.ADMIN_PLANS}
+          element={
+            <ProtectedRoute requireAdmin={true}>
+              <AdminPlansPage />
             </ProtectedRoute>
           }
         />

@@ -16,7 +16,33 @@ export const isRazorpayConfigured = () => {
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
   if (!keyId || !keySecret) return false;
-  if (keyId.includes('placeholder') || keySecret.includes('placeholder')) return false;
+  const trimmedId = String(keyId).trim();
+  const trimmedSecret = String(keySecret).trim();
+
+  if (!trimmedId || !trimmedSecret) return false;
+
+  const lowerId = trimmedId.toLowerCase();
+  const lowerSecret = trimmedSecret.toLowerCase();
+
+  if (
+    lowerId === 'undefined' ||
+    lowerSecret === 'undefined' ||
+    lowerId === 'null' ||
+    lowerSecret === 'null' ||
+    lowerId.includes('placeholder') ||
+    lowerSecret.includes('placeholder') ||
+    lowerId.includes('your_') ||
+    lowerSecret.includes('your_') ||
+    lowerId.includes('dummy') ||
+    lowerSecret.includes('dummy') ||
+    lowerId.includes('change_me') ||
+    lowerSecret.includes('change_me') ||
+    lowerId === 'rzp_test_placeholder' ||
+    lowerSecret === 'rzp_test_secret_placeholder'
+  ) {
+    return false;
+  }
+
   return true;
 };
 

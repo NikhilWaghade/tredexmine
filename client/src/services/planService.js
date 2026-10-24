@@ -24,21 +24,26 @@ export const getPlanById = async (id) => {
 };
 
 /**
- * Purchase a plan with optional idempotency key
+ * Purchase an active plan using wallet balance with mandatory idempotency key
  * @param {string} id - Plan MongoDB ObjectId
  * @param {Object} [options]
- * @param {string} [options.idempotencyKey] - Optional idempotency key to prevent double charging
+ * @param {string} [options.idempotencyKey] - Unique idempotency key (automatically generated if omitted)
  * @returns {Promise<{success: boolean, message: string, data: {userPlan: Object, walletBalance: number}}>}
  */
 export const purchasePlan = async (id, options = {}) => {
-  const headers = {};
-  if (options.idempotencyKey) {
-    headers['idempotency-key'] = options.idempotencyKey;
-  }
+  const idempotencyKey =
+    options.idempotencyKey ||
+    (typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `plan-wallet-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`);
+
+  const headers = {
+    'idempotency-key': idempotencyKey,
+  };
 
   const response = await api.post(
     `/plans/${id}/purchase`,
-    options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {},
+    { idempotencyKey },
     { headers }
   );
   return response.data;
@@ -63,11 +68,56 @@ export const createPlan = async (planData) => {
   return response.data;
 };
 
+/**
+ * Fetch all plans including inactive ones (Administrator only)
+ * @returns {Promise<{success: boolean, count: number, plans: Array}>}
+ */
+export const getAdminPlans = async () => {
+  const response = await api.get('/plans/admin/all');
+  return response.data;
+};
+
+/**
+ * Fetch any plan by ID, even if inactive (Administrator only)
+ * @param {string} id
+ * @returns {Promise<{success: boolean, plan: Object}>}
+ */
+export const getAdminPlanById = async (id) => {
+  const response = await api.get(`/plans/admin/${id}`);
+  return response.data;
+};
+
+/**
+ * Update an existing plan (Administrator only)
+ * @param {string} id
+ * @param {Object} updateData
+ * @returns {Promise<{success: boolean, message: string, plan: Object}>}
+ */
+export const updatePlan = async (id, updateData) => {
+  const response = await api.put(`/plans/${id}`, updateData);
+  return response.data;
+};
+
+/**
+ * Toggle or update active status of a plan (Administrator only)
+ * @param {string} id
+ * @param {boolean} [isActive]
+ * @returns {Promise<{success: boolean, message: string, plan: Object}>}
+ */
+export const togglePlanStatus = async (id, isActive) => {
+  const response = await api.patch(`/plans/${id}/status`, isActive !== undefined ? { isActive } : {});
+  return response.data;
+};
+
 export default {
   getPlans,
   getPlanById,
   purchasePlan,
   getMyActivePlans,
   createPlan,
+  getAdminPlans,
+  getAdminPlanById,
+  updatePlan,
+  togglePlanStatus,
 };
 

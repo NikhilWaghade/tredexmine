@@ -208,10 +208,138 @@ export const getMe = (req, res) => {
   });
 };
 
+/**
+ * Development-only endpoint to provision an administrator account via JSON payload
+ * Requires NODE_ENV !== 'production' and valid x-dev-provision-secret header (enforced by devProvisionGuard)
+ * @route POST /api/v1/auth/dev-provision-admin
+ */
+export const devProvisionAdmin = async (req, res, next) => {
+  try {
+    const { name, email, password, force } = req.body || {};
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedName = name.trim();
+
+    // 1. Check if user already exists
+    const existingUser = await User.findOne({ email: normalizedEmail }).select('+password');
+
+    if (existingUser) {
+      // Case A: User already exists as an administrator
+      if (existingUser.role === 'admin') {
+        if (!force) {
+          return res.status(409).json({
+            success: false,
+            message: `User "${normalizedEmail}" is already an administrator. Set "force": true in JSON body to update credentials.`,
+            data: {
+              user: {
+                id: existingUser._id,
+                name: existingUser.name,
+                email: existingUser.email,
+                role: existingUser.role,
+              },
+            },
+          });
+        }
+
+        // Force update existing admin credentials
+        existingUser.name = normalizedName;
+        existingUser.password = password; // Trigger pre('save') bcryptjs hash
+        await existingUser.save();
+
+        return res.status(200).json({
+          success: true,
+          message: `Administrator "${normalizedEmail}" credentials updated successfully.`,
+          data: {
+            user: {
+              id: existingUser._id,
+              name: existingUser.name,
+              email: existingUser.email,
+              role: existingUser.role,
+            },
+            action: 'updated',
+          },
+        });
+      }
+
+      // Case B: User exists as a standard user (role: 'user')
+      if (!force) {
+        return res.status(409).json({
+          success: false,
+          message: `Account "${normalizedEmail}" already exists as a standard user. Set "force": true in JSON body to promote this account to administrator.`,
+          data: {
+            user: {
+              id: existingUser._id,
+              name: existingUser.name,
+              email: existingUser.email,
+              role: existingUser.role,
+            },
+          },
+        });
+      }
+
+      // Force promote user to administrator
+      existingUser.role = 'admin';
+      existingUser.name = normalizedName;
+      existingUser.password = password;
+      existingUser.isVerified = true;
+      await existingUser.save();
+
+      return res.status(200).json({
+        success: true,
+        message: `Existing user "${normalizedEmail}" promoted to administrator successfully.`,
+        data: {
+          user: {
+            id: existingUser._id,
+            name: existingUser.name,
+            email: existingUser.email,
+            role: existingUser.role,
+          },
+          action: 'promoted',
+        },
+      });
+    }
+
+    // 2. Create new administrator user
+    const newUser = new User({
+      name: normalizedName,
+      email: normalizedEmail,
+      password,
+      role: 'admin',
+      isVerified: true,
+    });
+
+    await newUser.save();
+
+    // 3. Ensure linked wallet exists
+    try {
+      await createWalletForUser(newUser._id);
+    } catch (walletErr) {
+      // Wallet creation failure should not crash admin creation
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: `Development administrator "${normalizedEmail}" created successfully.`,
+      data: {
+        user: {
+          id: newUser._id,
+          name: newUser.name,
+          email: newUser.email,
+          role: newUser.role,
+        },
+        action: 'created',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export default {
   register,
   login,
   refresh,
   logout,
   getMe,
+  devProvisionAdmin,
 };

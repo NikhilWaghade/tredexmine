@@ -98,7 +98,7 @@ export function ActivePlansSection({ userPlans = [], isLoading = false, onRefres
 
                 <div className="flex items-baseline gap-2 mb-4">
                   <span className="text-2xl font-extrabold text-white">
-                    ${Number(up.price).toFixed(2)}
+                    ₹{Number(up.price).toLocaleString('en-IN')}
                   </span>
                   <span className="text-xs text-gray-400">
                     ({up.durationDays} Days Duration)

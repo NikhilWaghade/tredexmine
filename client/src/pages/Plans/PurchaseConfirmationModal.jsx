@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { planService, paymentService } from '../../services';
 import { Button } from '../../components/common';
 import { useAuth } from '../../context';
@@ -11,14 +11,71 @@ export function PurchaseConfirmationModal({
 }) {
   const { user } = useAuth();
 
-  // Payment method selection: 'upi' | 'wallet'
-  const [paymentMethod, setPaymentMethod] = useState('upi');
+  // Payment gateway configuration state (Razorpay/UPI availability)
+  const [gatewayConfig, setGatewayConfig] = useState({
+    isConfigured: false,
+    keyId: '',
+    currency: 'INR',
+    isSandbox: false,
+  });
+  const [isConfigLoading, setIsConfigLoading] = useState(true);
+
+  // Payment method selection: 'upi' | 'wallet' (defaults to 'wallet' when gateway unconfigured)
+  const [paymentMethod, setPaymentMethod] = useState('wallet');
 
   // Checkout process states: 'idle' | 'creating_order' | 'gateway_open' | 'verifying' | 'success' | 'error'
   const [checkoutState, setCheckoutState] = useState('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [error, setError] = useState(null);
   const [activatedData, setActivatedData] = useState(null);
+
+  // Fetch gateway configuration on mount before user interacts with checkout options
+  useEffect(() => {
+    let isMounted = true;
+    const fetchConfig = async () => {
+      try {
+        const response = await paymentService.getPaymentConfig();
+        if (!isMounted) return;
+
+        const config = response?.data || response || {};
+        const configured = Boolean(config.isConfigured);
+
+        setGatewayConfig({
+          isConfigured: configured,
+          keyId: config.keyId || '',
+          currency: config.currency || 'INR',
+          isSandbox: Boolean(config.isSandbox),
+        });
+
+        // Set initial payment method: if configured, prefer 'upi'; otherwise enforce 'wallet'
+        if (configured) {
+          setPaymentMethod('upi');
+        } else {
+          setPaymentMethod('wallet');
+        }
+      } catch (err) {
+        console.warn('[PurchaseConfirmationModal] Failed to load payment configuration:', err);
+        if (isMounted) {
+          setGatewayConfig({
+            isConfigured: false,
+            keyId: '',
+            currency: 'INR',
+            isSandbox: false,
+          });
+          setPaymentMethod('wallet');
+        }
+      } finally {
+        if (isMounted) {
+          setIsConfigLoading(false);
+        }
+      }
+    };
+
+    fetchConfig();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   if (!plan) return null;
 
@@ -34,6 +91,11 @@ export function PurchaseConfirmationModal({
 
   // --- UPI Gateway Checkout Flow (Razorpay) ---
   const handleUpiCheckout = async () => {
+    if (!gatewayConfig.isConfigured) {
+      setError('Payment gateway is currently unavailable. Payment Gateway Pending Configuration.');
+      return;
+    }
+
     setCheckoutState('creating_order');
     setError(null);
     setStatusMessage('Initiating secure gateway order...');
@@ -55,9 +117,10 @@ export function PurchaseConfirmationModal({
       }
 
       // Check if test key placeholder is present
-      if (!keyId || keyId.includes('placeholder')) {
+      const effectiveKey = keyId || gatewayConfig.keyId;
+      if (!effectiveKey || effectiveKey.includes('placeholder')) {
         throw new Error(
-          'Gateway credentials pending: RAZORPAY_KEY_ID is not configured in server/.env. Please configure your Razorpay Sandbox keys.'
+          'Payment Gateway Pending Configuration: Razorpay sandbox keys are not configured.'
         );
       }
 
@@ -300,6 +363,24 @@ export function PurchaseConfirmationModal({
               </div>
             </div>
 
+            {/* Payment Gateway Pending Configuration Alert Banner */}
+            {!gatewayConfig.isConfigured && !isConfigLoading && (
+              <div
+                id="gateway-pending-alert"
+                className="mb-4 p-3.5 rounded-xl bg-amber-950/40 border border-amber-800/50 text-amber-200 text-xs flex items-start gap-2.5"
+              >
+                <svg className="w-4 h-4 flex-shrink-0 text-amber-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <div className="flex-1">
+                  <span className="font-semibold block mb-0.5">Payment Gateway Pending Configuration</span>
+                  <span className="text-amber-300/80 leading-relaxed">
+                    Online UPI checkout is temporarily disabled. Please use your internal wallet balance to activate this plan.
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Payment Method Selector */}
             <div className="mb-5">
               <label className="text-xs font-semibold uppercase tracking-wider text-gray-400 block mb-2">
@@ -310,26 +391,38 @@ export function PurchaseConfirmationModal({
                 {/* Option 1: Direct UPI (Razorpay) */}
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod('upi')}
-                  disabled={isProcessing}
+                  id="checkout-method-upi"
+                  onClick={() => gatewayConfig.isConfigured && setPaymentMethod('upi')}
+                  disabled={isProcessing || !gatewayConfig.isConfigured}
                   className={`p-3 rounded-xl border text-left transition-all relative ${
-                    paymentMethod === 'upi'
+                    !gatewayConfig.isConfigured
+                      ? 'opacity-40 cursor-not-allowed bg-white/[0.01] border-white/5'
+                      : paymentMethod === 'upi'
                       ? 'bg-purple-950/40 border-[#7A56D6] shadow-sm shadow-[#7A56D6]/30'
                       : 'bg-white/[0.02] border-white/10 hover:border-white/20'
                   }`}
+                  aria-disabled={!gatewayConfig.isConfigured}
+                  title={!gatewayConfig.isConfigured ? 'Payment Gateway Pending Configuration' : undefined}
                 >
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/40 block w-fit mb-1.5">
-                    Recommended
-                  </span>
+                  {gatewayConfig.isConfigured ? (
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/40 block w-fit mb-1.5">
+                      Recommended
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/80 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/30 block w-fit mb-1.5">
+                      Disabled
+                    </span>
+                  )}
                   <span className="text-xs font-bold text-white block">UPI Gateway</span>
                   <span className="text-[11px] text-gray-400 block mt-0.5">
-                    GPay, PhonePe, Paytm, QR
+                    {gatewayConfig.isConfigured ? 'GPay, PhonePe, Paytm, QR' : 'Gateway Unavailable'}
                   </span>
                 </button>
 
                 {/* Option 2: Internal Wallet */}
                 <button
                   type="button"
+                  id="checkout-method-wallet"
                   onClick={() => setPaymentMethod('wallet')}
                   disabled={isProcessing}
                   className={`p-3 rounded-xl border text-left transition-all ${
@@ -350,7 +443,7 @@ export function PurchaseConfirmationModal({
             </div>
 
             {/* UPI Details Box */}
-            {paymentMethod === 'upi' && (
+            {paymentMethod === 'upi' && gatewayConfig.isConfigured && (
               <div className="p-3.5 rounded-xl bg-purple-950/20 border border-purple-900/30 mb-5 text-xs text-gray-300 space-y-2">
                 <div className="flex items-center gap-2 text-purple-300 font-semibold">
                   <svg className="w-4 h-4 text-[#7A56D6]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -403,7 +496,15 @@ export function PurchaseConfirmationModal({
                 </div>
                 {!isSufficientWalletBalance && (
                   <p className="text-[11px] text-amber-300 pt-1">
-                    Tip: Switch to <strong>UPI Gateway</strong> to pay directly without depositing into your wallet.
+                    {gatewayConfig.isConfigured ? (
+                      <>
+                        Tip: Switch to <strong>UPI Gateway</strong> to pay directly without depositing into your wallet.
+                      </>
+                    ) : (
+                      <>
+                        Insufficient balance. Please deposit funds into your internal wallet to activate this plan.
+                      </>
+                    )}
                   </p>
                 )}
               </div>
@@ -423,10 +524,11 @@ export function PurchaseConfirmationModal({
 
               {paymentMethod === 'upi' ? (
                 <Button
+                  id="pay-via-upi-btn"
                   onClick={handleUpiCheckout}
                   variant="primary"
                   size="md"
-                  disabled={isProcessing}
+                  disabled={isProcessing || !gatewayConfig.isConfigured}
                   className="w-full sm:w-auto"
                 >
                   {isProcessing ? (
@@ -437,12 +539,15 @@ export function PurchaseConfirmationModal({
                       </svg>
                       {statusMessage || 'Processing...'}
                     </span>
+                  ) : !gatewayConfig.isConfigured ? (
+                    'Payment Gateway Pending Configuration'
                   ) : (
                     `Pay ${formattedInrPrice} via UPI`
                   )}
                 </Button>
               ) : (
                 <Button
+                  id="pay-via-wallet-btn"
                   onClick={handleWalletPurchase}
                   variant="primary"
                   size="md"
