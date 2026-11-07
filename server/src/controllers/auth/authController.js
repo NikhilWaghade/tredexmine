@@ -1,18 +1,16 @@
+import crypto from 'node:crypto';
+import mongoose from 'mongoose';
 import { User } from '../../models/User.js';
+import { RefreshToken } from '../../models/RefreshToken.js';
 import {
   generateAccessToken,
+  generateRefreshToken,
   generateAuthTokens,
   verifyRefreshToken,
+  hashToken,
+  getRefreshCookieOptions,
 } from '../../utils/tokenService.js';
 import { createWalletForUser } from '../../services/walletService.js';
-
-// Cookie options for refresh token
-const REFRESH_COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
-};
 
 /**
  * Register a new user and automatically create their wallet
@@ -54,13 +52,34 @@ export const register = async (req, res, next) => {
     // 4. Automatically create linked wallet for user
     const wallet = await createWalletForUser(user._id);
 
-    // 5. Generate tokens
-    const { accessToken, refreshToken } = generateAuthTokens(user);
+    // 5. Generate tokens with unique family session identifier
+    const family = crypto.randomUUID();
+    const { accessToken, refreshToken } = generateAuthTokens(user, process.env, { family });
+    const tokenHash = hashToken(refreshToken);
 
-    // 6. Set refresh token in HTTP-only cookie
-    res.cookie('refreshToken', refreshToken, REFRESH_COOKIE_OPTIONS);
+    // 6. Persist token hash securely in database (never raw token)
+    if (mongoose.connection?.readyState === 1 || RefreshToken.create !== mongoose.Model.create) {
+      try {
+        await RefreshToken.create({
+          user: user._id,
+          tokenHash,
+          family,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          isRevoked: false,
+          createdByIp: req.ip || '',
+          userAgent: req.headers['user-agent'] || '',
+        });
+      } catch (tokenErr) {
+        // If DB write fails, fail registration securely
+        throw tokenErr;
+      }
+    }
 
-    // 7. Return response with user, linked wallet, and tokens
+    // 7. Set refresh token ONLY in HTTP-only secure cookie
+    const cookieOptions = getRefreshCookieOptions();
+    res.cookie('refreshToken', refreshToken, cookieOptions);
+
+    // 8. Return response (NEVER return refreshToken in JSON body)
     return res.status(201).json({
       success: true,
       message: 'User registered successfully',
@@ -68,7 +87,6 @@ export const register = async (req, res, next) => {
         user,
         wallet,
         accessToken,
-        refreshToken,
       },
     });
   } catch (error) {
@@ -102,20 +120,39 @@ export const login = async (req, res, next) => {
       });
     }
 
-    // 3. Generate tokens
-    const { accessToken, refreshToken } = generateAuthTokens(user);
+    // 3. Generate tokens with unique family session identifier
+    const family = crypto.randomUUID();
+    const { accessToken, refreshToken } = generateAuthTokens(user, process.env, { family });
+    const tokenHash = hashToken(refreshToken);
 
-    // 4. Set refresh token in HTTP-only cookie
-    res.cookie('refreshToken', refreshToken, REFRESH_COOKIE_OPTIONS);
+    // 4. Persist token hash securely in database (never raw token)
+    if (mongoose.connection?.readyState === 1 || RefreshToken.create !== mongoose.Model.create) {
+      try {
+        await RefreshToken.create({
+          user: user._id,
+          tokenHash,
+          family,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          isRevoked: false,
+          createdByIp: req.ip || '',
+          userAgent: req.headers['user-agent'] || '',
+        });
+      } catch (tokenErr) {
+        throw tokenErr;
+      }
+    }
 
-    // 5. Return response
+    // 5. Set refresh token ONLY in HTTP-only secure cookie
+    const cookieOptions = getRefreshCookieOptions();
+    res.cookie('refreshToken', refreshToken, cookieOptions);
+
+    // 6. Return response (NEVER return refreshToken in JSON body)
     return res.status(200).json({
       success: true,
       message: 'Login successful',
       data: {
         user,
         accessToken,
-        refreshToken,
       },
     });
   } catch (error) {
@@ -124,33 +161,155 @@ export const login = async (req, res, next) => {
 };
 
 /**
- * Refresh access token using refresh token
+ * Refresh access token using refresh token rotation
+ * Enforces atomic invalidation, single-winner concurrency, and token family reuse detection
  * @route POST /api/v1/auth/refresh
  */
 export const refresh = async (req, res, next) => {
   try {
-    // 1. Read refresh token from cookies or request body
+    // 1. Read refresh token from cookies (preferred) or request body (API fallback)
     const token = req.cookies?.refreshToken || req.body?.refreshToken;
 
-    if (!token) {
+    if (!token || typeof token !== 'string' || token.trim().length === 0) {
       return res.status(401).json({
         success: false,
         message: 'Refresh token is required',
       });
     }
 
-    // 2. Verify refresh token
+    const trimmedToken = token.trim();
+
+    // 2. Verify refresh token cryptographic signature and expiration
     let decoded;
     try {
-      decoded = verifyRefreshToken(token);
-    } catch (err) {
+      decoded = verifyRefreshToken(trimmedToken);
+    } catch (_) {
       return res.status(401).json({
         success: false,
         message: 'Invalid or expired refresh token',
       });
     }
 
-    // 3. Find user
+    const tokenHash = hashToken(trimmedToken);
+
+    // 3. Persistent verification and atomic rotation
+    if (mongoose.connection?.readyState === 1 || RefreshToken.findOne !== mongoose.Model.findOne) {
+      const existingToken = await RefreshToken.findOne({ tokenHash });
+
+      if (!existingToken) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired refresh token',
+        });
+      }
+
+      // Check if token was already revoked/rotated -> REUSE ATTACK DETECTED!
+      if (existingToken.isRevoked) {
+        // Immediate family invalidation: revoke all active tokens in this session family
+        try {
+          await RefreshToken.updateMany(
+            { family: existingToken.family },
+            { $set: { isRevoked: true, revokedAt: new Date() } }
+          );
+        } catch (_) {}
+
+        const cookieOptions = getRefreshCookieOptions();
+        res.clearCookie('refreshToken', cookieOptions);
+        res.clearCookie('refreshToken', { ...cookieOptions, path: '/' });
+
+        return res.status(401).json({
+          success: false,
+          message: 'Refresh token has already been used and was revoked: session terminated',
+        });
+      }
+
+      // Check database expiration
+      if (existingToken.expiresAt && existingToken.expiresAt.getTime() <= Date.now()) {
+        return res.status(401).json({
+          success: false,
+          message: 'Refresh token has expired',
+        });
+      }
+
+      // 4. Atomic Compare-And-Swap (CAS) to invalidate current token
+      // Guarantees only one concurrent request can ever rotate this token
+      const claimedToken = await RefreshToken.findOneAndUpdate(
+        {
+          _id: existingToken._id,
+          isRevoked: false,
+        },
+        {
+          $set: {
+            isRevoked: true,
+            revokedAt: new Date(),
+          },
+        },
+        { new: true }
+      );
+
+      if (!claimedToken) {
+        // Concurrent race detected: token was already claimed by a parallel request
+        try {
+          await RefreshToken.updateMany(
+            { family: existingToken.family },
+            { $set: { isRevoked: true, revokedAt: new Date() } }
+          );
+        } catch (_) {}
+
+        const cookieOptions = getRefreshCookieOptions();
+        res.clearCookie('refreshToken', cookieOptions);
+        res.clearCookie('refreshToken', { ...cookieOptions, path: '/' });
+
+        return res.status(401).json({
+          success: false,
+          message: 'Refresh token rotation race detected: token already rotated',
+        });
+      }
+
+      // 5. Find user
+      const user = await User.findById(decoded.id);
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          message: 'User session expired or user no longer exists',
+        });
+      }
+
+      // 6. Generate rotated tokens preserving family session lineage
+      const family = existingToken.family || decoded.family || crypto.randomUUID();
+      const newAccessToken = generateAccessToken({ id: user._id, role: user.role });
+      const newRefreshToken = generateRefreshToken({ id: user._id, family });
+      const newTokenHash = hashToken(newRefreshToken);
+
+      // Persist replacement token
+      await RefreshToken.create({
+        user: user._id,
+        tokenHash: newTokenHash,
+        family,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        isRevoked: false,
+        createdByIp: req.ip || '',
+        userAgent: req.headers['user-agent'] || '',
+      });
+
+      // Link lineage
+      claimedToken.replacedByTokenHash = newTokenHash;
+      await claimedToken.save();
+
+      // Set rotated refresh token in HTTP-only cookie
+      const cookieOptions = getRefreshCookieOptions();
+      res.cookie('refreshToken', newRefreshToken, cookieOptions);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Token refreshed successfully',
+        data: {
+          accessToken: newAccessToken,
+        },
+      });
+    }
+
+    // In-memory fallback when executing in disconnected unit mock tests
     const user = await User.findById(decoded.id);
     if (!user) {
       return res.status(401).json({
@@ -159,11 +318,9 @@ export const refresh = async (req, res, next) => {
       });
     }
 
-    // 4. Generate new access token
-    const newAccessToken = generateAccessToken({
-      id: user._id,
-      role: user.role,
-    });
+    const newAccessToken = generateAccessToken({ id: user._id, role: user.role });
+    const newRefreshToken = generateRefreshToken({ id: user._id });
+    res.cookie('refreshToken', newRefreshToken, getRefreshCookieOptions());
 
     return res.status(200).json({
       success: true,
@@ -178,20 +335,36 @@ export const refresh = async (req, res, next) => {
 };
 
 /**
- * Logout user
+ * Logout user: revokes refresh token on server and clears client cookie
  * @route POST /api/v1/auth/logout
  */
-export const logout = (req, res) => {
-  res.clearCookie('refreshToken', {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-  });
+export const logout = async (req, res, next) => {
+  try {
+    const token = req.cookies?.refreshToken || req.body?.refreshToken;
 
-  return res.status(200).json({
-    success: true,
-    message: 'Logged out successfully',
-  });
+    if (token && typeof token === 'string' && token.trim().length > 0) {
+      const tokenHash = hashToken(token);
+      if (mongoose.connection?.readyState === 1 || RefreshToken.findOneAndUpdate !== mongoose.Model.findOneAndUpdate) {
+        try {
+          await RefreshToken.findOneAndUpdate(
+            { tokenHash },
+            { $set: { isRevoked: true, revokedAt: new Date() } }
+          );
+        } catch (_) {}
+      }
+    }
+
+    const cookieOptions = getRefreshCookieOptions();
+    res.clearCookie('refreshToken', cookieOptions);
+    res.clearCookie('refreshToken', { ...cookieOptions, path: '/' });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Logged out successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
 /**

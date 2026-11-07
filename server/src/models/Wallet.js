@@ -29,6 +29,11 @@ const walletSchema = new mongoose.Schema(
       default: 0,
       min: [0, 'Total withdrawn cannot be negative'],
     },
+    processedOperations: {
+      type: [String],
+      default: [],
+      index: true,
+    },
   },
   {
     timestamps: true,

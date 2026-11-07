@@ -7,7 +7,8 @@ import { DashboardPage } from '../pages/Dashboard';
 import { AboutPage } from '../pages/About';
 import { ContactPage } from '../pages/Contact';
 import { NotFoundPage } from '../pages/NotFound';
-import { AdminPlansPage } from '../pages/Admin';
+import { AdminPlansPage, AdminWithdrawalsPage } from '../pages/Admin';
+import { WalletPage } from '../pages/Wallet';
 import { ProtectedRoute } from '../components/auth';
 import { useAuth } from '../context';
 import { ROUTES } from '../constants';
@@ -37,10 +38,26 @@ export function AppRoutes() {
           }
         />
         <Route
+          path={ROUTES.WALLET}
+          element={
+            <ProtectedRoute>
+              <WalletPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path={ROUTES.ADMIN_PLANS}
           element={
             <ProtectedRoute requireAdmin={true}>
               <AdminPlansPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path={ROUTES.ADMIN_WITHDRAWALS}
+          element={
+            <ProtectedRoute requireAdmin={true}>
+              <AdminWithdrawalsPage />
             </ProtectedRoute>
           }
         />

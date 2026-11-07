@@ -6,3 +6,5 @@ export * from './authorize.js';
 export { default as authorize } from './authorize.js';
 export * from './devProvisionGuard.js';
 export { default as devProvisionGuard } from './devProvisionGuard.js';
+export * from './csrfProtection.js';
+export { default as validateAuthCsrf } from './csrfProtection.js';
