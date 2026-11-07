@@ -12,15 +12,15 @@ import {
   loginValidation,
   devAdminProvisionValidation,
 } from '../validators/index.js';
-import { protect, devProvisionGuard } from '../middleware/index.js';
+import { protect, devProvisionGuard, validateAuthCsrf } from '../middleware/index.js';
 
 const router = Router();
 
 // Public routes (standard authentication)
 router.post('/register', registerValidation, register);
 router.post('/login', loginValidation, login);
-router.post('/refresh', refresh);
-router.post('/logout', logout);
+router.post('/refresh', validateAuthCsrf, refresh);
+router.post('/logout', validateAuthCsrf, logout);
 
 // Protected routes
 router.get('/me', protect, getMe);

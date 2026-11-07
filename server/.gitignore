@@ -1,0 +1,13 @@
+# Server-level gitignore (defence-in-depth — root .gitignore also excludes these)
+.env
+.env.local
+.env.*.local
+# Node / build artefacts
+node_modules
+dist
+build
+coverage
+*.log
+# OS noise
+.DS_Store
+Thumbs.db

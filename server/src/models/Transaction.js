@@ -43,7 +43,6 @@ const transactionSchema = new mongoose.Schema(
     reference: {
       type: String,
       trim: true,
-      sparse: true,
     },
     balanceBefore: {
       type: Number,

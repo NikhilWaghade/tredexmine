@@ -5,6 +5,8 @@ export const ROUTES = {
   ABOUT: '/about',
   CONTACT: '/contact',
   LOGIN: '/login',
+  WALLET: '/wallet',
   ADMIN_PLANS: '/admin/plans',
+  ADMIN_WITHDRAWALS: '/admin/withdrawals',
   NOT_FOUND: '*',
 };

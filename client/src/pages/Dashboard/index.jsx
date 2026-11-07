@@ -317,7 +317,20 @@ export function DashboardPage() {
             <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               ₹{Number(wallet.balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
-            <p className="text-[11px] text-gray-400 mt-2">Available for node deployment or withdrawals</p>
+            <div className="mt-3 flex items-center gap-2">
+              <Link
+                to={ROUTES.WALLET}
+                className="flex-1 text-center py-1.5 px-2 rounded-lg bg-[#7A56D6]/20 hover:bg-[#7A56D6]/40 text-purple-200 hover:text-white border border-[#7A56D6]/40 text-xs font-semibold transition-all"
+              >
+                + Deposit
+              </Link>
+              <Link
+                to={ROUTES.WALLET}
+                className="flex-1 text-center py-1.5 px-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 text-xs font-semibold transition-all"
+              >
+                Withdraw
+              </Link>
+            </div>
           </Card>
 
           {/* Card 2: Active Plans Count */}

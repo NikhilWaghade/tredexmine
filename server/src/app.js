@@ -11,13 +11,45 @@ import { notFoundMiddleware, errorMiddleware } from './middleware/index.js';
 
 const app = express();
 
+// Trust reverse proxy (e.g. AWS ALB, Cloudflare, NGINX) in production/staging
+// Ensures req.ip accurately reflects the true client IP via X-Forwarded-For
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Security HTTP headers
 app.use(helmet());
 
-// Cross-Origin Resource Sharing
+/**
+ * CORS Allow-list
+ *
+ * Supports multiple origins via CLIENT_URL and STAGING_CLIENT_URL env vars.
+ * Development localhost origins are always included.
+ *
+ * Cookie sameSite is 'lax' (not 'strict') by design:
+ *   'strict' would break OAuth redirect flows and cross-tab navigation because
+ *   browsers strip same-site=strict cookies on top-level cross-site navigations,
+ *   meaning users landing from email links or OAuth providers would lose their
+ *   session.  'lax' provides CSRF protection for state-mutating methods (POST,
+ *   PATCH, DELETE) while allowing safe top-level navigations.
+ */
+const getAllowedOrigins = () => {
+  const origins = new Set(['http://localhost:5173', 'http://127.0.0.1:5173']);
+  if (process.env.CLIENT_URL) origins.add(process.env.CLIENT_URL.trim());
+  if (process.env.STAGING_CLIENT_URL) origins.add(process.env.STAGING_CLIENT_URL.trim());
+  return origins;
+};
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    origin: (origin, callback) => {
+      // Allow server-to-server requests (no Origin header)
+      if (!origin) return callback(null, true);
+      if (getAllowedOrigins().has(origin)) return callback(null, true);
+      const corsErr = new Error(`CORS policy: origin '${origin}' is not allowed`);
+      corsErr.statusCode = 403;
+      callback(corsErr);
+    },
     credentials: true,
   })
 );
@@ -33,7 +65,8 @@ const globalLimiter = rateLimit({
   max: 100, // Limit each IP to 100 requests per 15 minutes
   standardHeaders: true,
   legacyHeaders: false,
-  message: {
+  // Skip rate limiting in non-production environments (prevents shared in-memory counter collisions in tests)
+  skip: () => process.env.NODE_ENV !== 'production',  message: {
     success: false,
     message: 'Too many requests from this IP, please try again after 15 minutes.',
   },

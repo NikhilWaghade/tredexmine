@@ -1,4 +1,4 @@
-import { describe, it, before, after, afterEach } from 'node:test';
+import { describe, it, before, after, afterEach, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -10,6 +10,8 @@ import { Payment } from '../src/models/Payment.js';
 import { User } from '../src/models/User.js';
 import { Wallet } from '../src/models/Wallet.js';
 import { Transaction } from '../src/models/Transaction.js';
+import { WebhookEvent } from '../src/models/WebhookEvent.js';
+import { Deposit } from '../src/models/Deposit.js';
 import { generateAccessToken } from '../src/utils/tokenService.js';
 import {
   verifyPaymentSignature,
@@ -586,6 +588,34 @@ describe('Payment & UPI Gateway Integration Tests', () => {
   });
 
   describe('Webhook Endpoint (POST /api/v1/payments/webhook)', () => {
+    let origWebhookEventCreate;
+    let origWebhookEventFindOne;
+    let origWebhookEventUpdateOne;
+    let origWebhookEventFindOneAndUpdate;
+
+    beforeEach(() => {
+      origWebhookEventCreate = WebhookEvent.create;
+      origWebhookEventFindOne = WebhookEvent.findOne;
+      origWebhookEventUpdateOne = WebhookEvent.updateOne;
+      origWebhookEventFindOneAndUpdate = WebhookEvent.findOneAndUpdate;
+
+      WebhookEvent.create = async (doc) => ({
+        _id: new mongoose.Types.ObjectId(),
+        status: 'processing',
+        ...doc,
+      });
+      WebhookEvent.findOne = async () => null;
+      WebhookEvent.updateOne = async () => ({ acknowledged: true, modifiedCount: 1 });
+      WebhookEvent.findOneAndUpdate = async () => null;
+    });
+
+    afterEach(() => {
+      WebhookEvent.create = origWebhookEventCreate;
+      WebhookEvent.findOne = origWebhookEventFindOne;
+      WebhookEvent.updateOne = origWebhookEventUpdateOne;
+      WebhookEvent.findOneAndUpdate = origWebhookEventFindOneAndUpdate;
+    });
+
     it('rejects webhook with missing signature header with 400', async () => {
       const res = await fetch(`${baseUrl}/api/v1/payments/webhook`, {
         method: 'POST',
@@ -762,6 +792,169 @@ describe('Payment & UPI Gateway Integration Tests', () => {
       } finally {
         Payment.findOne = origPaymentFindOne;
       }
+    });
+
+    it('returns HTTP 503 Service Unavailable for in-flight duplicate webhook (H-01)', async () => {
+      const eventId = 'evt_http_inflight_503';
+      const orderId = 'order_http_inflight';
+      const payload = JSON.stringify({
+        id: eventId,
+        event: 'payment.captured',
+        payload: { payment: { entity: { id: 'pay_inflight', order_id: orderId, amount: 50000, currency: 'INR' } } },
+      });
+      const signature = crypto.createHmac('sha256', testWebhookSecret).update(payload).digest('hex');
+
+      // Stub WebhookEvent.create to throw E11000 duplicate key error
+      WebhookEvent.create = async () => {
+        const err = new Error('E11000 duplicate key error');
+        err.code = 11000;
+        throw err;
+      };
+
+      // Stub WebhookEvent.findOne to return active in-flight processing event
+      WebhookEvent.findOne = async () => ({
+        provider: 'razorpay',
+        eventId,
+        status: 'processing',
+        lastReceivedAt: new Date(), // Active (elapsed < 60s)
+        createdAt: new Date(),
+        orderId,
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/payments/webhook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-razorpay-signature': signature,
+          'x-razorpay-event-id': eventId,
+        },
+        body: payload,
+      });
+
+      assert.strictEqual(res.status, 503);
+      const data = await res.json();
+      assert.strictEqual(data.success, false);
+      assert.strictEqual(data.result.status, 'in_flight');
+      assert.strictEqual(data.result.retryable, true);
+      assert.match(data.message, /in-flight/i);
+    });
+
+    it('returns HTTP 503 for out-of-order webhook when order is not yet found (L-01)', async () => {
+      const eventId = 'evt_http_order_pending_503';
+      const orderId = 'order_nonexistent_yet';
+      const payload = JSON.stringify({
+        id: eventId,
+        event: 'payment.captured',
+        payload: { payment: { entity: { id: 'pay_ooo', order_id: orderId, amount: 50000, currency: 'INR' } } },
+      });
+      const signature = crypto.createHmac('sha256', testWebhookSecret).update(payload).digest('hex');
+
+      const origPaymentFindOne = Payment.findOne;
+      const origDepositFindOne = Deposit.findOne;
+      Payment.findOne = () => ({
+        populate: () => Promise.resolve(null),
+        then: (resolve) => resolve(null),
+      });
+      Deposit.findOne = async () => null;
+
+      try {
+        const res = await fetch(`${baseUrl}/api/v1/payments/webhook`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-razorpay-signature': signature,
+            'x-razorpay-event-id': eventId,
+          },
+          body: payload,
+        });
+
+        assert.strictEqual(res.status, 503);
+        const data = await res.json();
+        assert.strictEqual(data.success, false);
+        assert.strictEqual(data.result.status, 'order_pending');
+        assert.strictEqual(data.result.retryable, true);
+      } finally {
+        Payment.findOne = origPaymentFindOne;
+        Deposit.findOne = origDepositFindOne;
+      }
+    });
+
+    it('returns HTTP 200 OK for already-processed duplicate webhook', async () => {
+      const eventId = 'evt_http_processed_200';
+      const orderId = 'order_http_done';
+      const payload = JSON.stringify({
+        id: eventId,
+        event: 'payment.captured',
+        payload: { payment: { entity: { id: 'pay_done', order_id: orderId, amount: 50000, currency: 'INR' } } },
+      });
+      const signature = crypto.createHmac('sha256', testWebhookSecret).update(payload).digest('hex');
+
+      WebhookEvent.create = async () => {
+        const err = new Error('E11000 duplicate key error');
+        err.code = 11000;
+        throw err;
+      };
+
+      WebhookEvent.findOne = async () => ({
+        provider: 'razorpay',
+        eventId,
+        status: 'processed',
+        orderId,
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/payments/webhook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-razorpay-signature': signature,
+          'x-razorpay-event-id': eventId,
+        },
+        body: payload,
+      });
+
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.strictEqual(data.success, true);
+      assert.strictEqual(data.result.status, 'already_processed');
+    });
+
+    it('returns HTTP 422 for quarantined webhook event', async () => {
+      const eventId = 'evt_http_quarantined_422';
+      const orderId = 'order_http_quarantine';
+      const payload = JSON.stringify({
+        id: eventId,
+        event: 'payment.captured',
+        payload: { payment: { entity: { id: 'pay_quar', order_id: orderId, amount: 50000, currency: 'INR' } } },
+      });
+      const signature = crypto.createHmac('sha256', testWebhookSecret).update(payload).digest('hex');
+
+      WebhookEvent.create = async () => {
+        const err = new Error('E11000 duplicate key error');
+        err.code = 11000;
+        throw err;
+      };
+
+      WebhookEvent.findOne = async () => ({
+        provider: 'razorpay',
+        eventId,
+        status: 'quarantined',
+        orderId,
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/payments/webhook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-razorpay-signature': signature,
+          'x-razorpay-event-id': eventId,
+        },
+        body: payload,
+      });
+
+      assert.strictEqual(res.status, 422);
+      const data = await res.json();
+      assert.strictEqual(data.success, false);
+      assert.match(data.message, /quarantined/i);
     });
   });
 
