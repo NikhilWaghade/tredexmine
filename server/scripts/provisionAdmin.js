@@ -243,7 +243,7 @@ export const runCli = async () => {
     if (args.showHelp) {
       console.log(`
 ================================================================================
-TreadExMine — Development Admin Provisioning Utility
+Minetrades — Development Admin Provisioning Utility
 ================================================================================
 
 Usage:
@@ -278,7 +278,7 @@ Security Guard:
     const result = await provisionAdminUser(args);
 
     console.log('\n================================================================================');
-    console.log('TREADEXMINE DEVELOPMENT ADMIN PROVISIONING SUCCESS');
+    console.log('MINETRADES DEVELOPMENT ADMIN PROVISIONING SUCCESS');
     console.log('================================================================================');
     console.log(`Status:       ${result.isNew ? 'CREATED (New Admin)' : result.upgraded ? 'UPGRADED (Promoted User to Admin)' : 'UPDATED'}`);
     console.log(`Admin User:   ${result.user.name} <${result.user.email}>`);

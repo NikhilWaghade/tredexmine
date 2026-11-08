@@ -322,7 +322,7 @@ export const fundTestWallet = async (options = {}) => {
 const printUsage = () => {
   console.log(`
 ================================================================================
-TreadExMine - Safe Development Wallet Funding Script
+Minetrades - Safe Development Wallet Funding Script
 ================================================================================
 
 USAGE:
@@ -386,7 +386,7 @@ export const runCli = async () => {
     const result = await fundTestWallet({ userId, amount, reference });
 
     console.log('\n================================================================================');
-    console.log('TREADEXMINE DEVELOPMENT WALLET FUNDING SUCCESS');
+    console.log('MINETRADES DEVELOPMENT WALLET FUNDING SUCCESS');
     console.log('================================================================================');
     console.log(`Status:       ${result.isIdempotent ? 'ALREADY PROCESSED (Idempotent - No Balance Change)' : 'SUCCESS'}`);
     console.log(`User:         ${result.user.name} <${result.user.email}> (Role: ${result.user.role})`);

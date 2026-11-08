@@ -47,7 +47,7 @@ export function PlansPage() {
         const message =
           err.response?.data?.message ||
           (err.request
-            ? 'Network error: Unable to reach the TreadExMine server. Please check your connection and try again.'
+            ? 'Network error: Unable to reach the Minetrades server. Please check your connection and try again.'
             : 'Failed to load mining plans. Please try again later.');
         setPlansError(message);
       })
@@ -90,7 +90,7 @@ export function PlansPage() {
           const message =
             err.response?.data?.message ||
             (err.request
-              ? 'Network error: Unable to reach the TreadExMine server. Please check your connection and try again.'
+              ? 'Network error: Unable to reach the Minetrades server. Please check your connection and try again.'
               : 'Failed to load mining plans. Please try again later.');
           setPlansError(message);
           setPlansLoading(false);
@@ -140,6 +140,7 @@ export function PlansPage() {
   const handlePurchaseSuccess = async () => {
     // Refresh both wallet and active plans strictly from server
     await Promise.allSettled([refreshWallet(), reloadActivePlans()]);
+    window.dispatchEvent(new CustomEvent('minetrades:refresh'));
     window.dispatchEvent(new CustomEvent('treadex:refresh'));
   };
 

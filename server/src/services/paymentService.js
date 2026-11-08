@@ -7,6 +7,7 @@ import { Deposit } from '../models/Deposit.js';
 import { Transaction } from '../models/Transaction.js';
 import { WebhookEvent } from '../models/WebhookEvent.js';
 import { processDepositCredit, reconcileDepositRecord } from './walletService.js';
+import { processReferralRewardForPlanPurchase } from './referralService.js';
 import {
   getRazorpayInstance,
   isRazorpayConfigured,
@@ -283,11 +284,27 @@ export const activatePlanForPayment = async (payment, paymentId, signature = '',
     await payment.save(sessionOpt);
   }
 
+  // 7. Process referral reward for referrer if this is referred user's first eligible plan purchase
+  let referralReward = null;
+  try {
+    referralReward = await processReferralRewardForPlanPurchase({
+      payment,
+      session,
+    });
+  } catch (refErr) {
+    // If a database session is active, propagate error to trigger atomic rollback
+    if (session) {
+      throw refErr;
+    }
+    console.error('[PaymentService] Error executing referral reward for plan purchase:', refErr);
+  }
+
   return {
     success: true,
     isAlreadyActivated: false,
     message: 'Plan activated successfully',
     userPlan,
+    referralReward,
     payment: {
       orderId: payment.orderId,
       paymentId: payment.paymentId,
@@ -870,6 +887,161 @@ export const getPaymentConfig = () => {
   };
 };
 
+/**
+ * Development-only test simulation for plan purchase and referral rewards.
+ * Simulates a direct plan purchase (UPI) without invoking Razorpay Checkout or real APIs.
+ *
+ * @param {string|mongoose.Types.ObjectId} userId - Authenticated user ID
+ * @param {Object} options
+ * @param {string|mongoose.Types.ObjectId} options.planId - Target Plan ID
+ * @param {'success'|'failure'} [options.outcome='success'] - Simulation outcome
+ * @param {string} [options.idempotencyKey] - Optional idempotency key for deduplication
+ * @returns {Promise<Object>}
+ */
+export const simulatePlanPurchaseDev = async (
+  userId,
+  { planId, outcome = 'success', idempotencyKey = null }
+) => {
+  if (!planId) {
+    const error = new Error('Plan ID is required to simulate plan purchase');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (outcome !== 'success' && outcome !== 'failure') {
+    const error = new Error("Invalid outcome. Outcome must be 'success' or 'failure'");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 1. Authoritative plan lookup strictly from MongoDB
+  const plan = await Plan.findOne({ _id: planId, isActive: true });
+  if (!plan) {
+    const error = new Error('Plan not found or is currently inactive');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const trimmedKey =
+    idempotencyKey && typeof idempotencyKey === 'string' ? idempotencyKey.trim() : null;
+
+  // 2. Check duplicate simulation via idempotencyKey if provided
+  if (trimmedKey) {
+    const existingPayment = await Payment.findOne({
+      user: userId,
+      'metadata.devSimIdempotencyKey': trimmedKey,
+    }).populate('plan');
+
+    if (existingPayment) {
+      let existingUserPlan = null;
+      if (existingPayment.userPlan) {
+        existingUserPlan = await UserPlan.findById(existingPayment.userPlan);
+      }
+      return {
+        success: existingPayment.status === 'captured',
+        simulated: true,
+        isAlreadyProcessed: true,
+        message: 'Simulation request already processed for this idempotency key',
+        data: {
+          payment: existingPayment,
+          userPlan: existingUserPlan,
+          referralReward: null,
+        },
+      };
+    }
+  }
+
+  const now = Date.now();
+  const rand = Math.random().toString(36).substring(2, 9);
+  const orderId = `dev_sim_ord_${now}_${rand}`;
+  const paymentId = `dev_sim_pay_${now}_${rand}`;
+  const receipt = `rcpt_dev_sim_${now}_${Math.random().toString(36).substring(2, 8)}`;
+  const amountInPaise = Math.round(plan.price * 100);
+
+  // 3. Handle Failure Simulation Outcome
+  if (outcome === 'failure') {
+    const failedPayment = await Payment.create({
+      user: userId,
+      plan: plan._id,
+      gateway: 'dev_simulation',
+      orderId,
+      paymentId,
+      amount: plan.price,
+      amountInPaise,
+      currency: 'INR',
+      receipt,
+      status: 'failed',
+      paymentMethod: 'dev_simulation',
+      metadata: {
+        isDevSimulation: true,
+        devSimIdempotencyKey: trimmedKey || undefined,
+        failureReason: 'Simulated payment failure by developer',
+        simulatedAt: new Date(),
+      },
+    });
+
+    return {
+      success: false,
+      simulated: true,
+      message:
+        'Payment simulation completed with failed outcome. No plan activated and no referral reward credited.',
+      data: {
+        payment: failedPayment,
+        userPlan: null,
+        referralReward: null,
+      },
+    };
+  }
+
+  // 4. Handle Success Simulation Outcome
+  const payment = await Payment.create({
+    user: userId,
+    plan: plan._id,
+    gateway: 'dev_simulation',
+    orderId,
+    amount: plan.price,
+    amountInPaise,
+    currency: 'INR',
+    receipt,
+    status: 'created',
+    paymentMethod: 'dev_simulation',
+    metadata: {
+      isDevSimulation: true,
+      devSimIdempotencyKey: trimmedKey || undefined,
+      simulatedAt: new Date(),
+    },
+  });
+
+  // Assign plan instance to reuse pre-loaded duration and tier properties
+  payment.plan = plan;
+
+  const signature = `dev_sim_sig_${Math.random().toString(36).substring(2, 15)}`;
+  const activationResult = await activatePlanForPayment(payment, paymentId, signature);
+
+  return {
+    success: true,
+    simulated: true,
+    message: 'Payment simulation succeeded. Plan activated successfully.',
+    data: {
+      userPlan: activationResult.userPlan,
+      payment: activationResult.payment,
+      referralReward: activationResult.referralReward
+        ? {
+            ...activationResult.referralReward,
+            amount:
+              activationResult.referralReward.rewardAmount ||
+              activationResult.referralReward.amount ||
+              300,
+            rewardAmount:
+              activationResult.referralReward.rewardAmount ||
+              activationResult.referralReward.amount ||
+              300,
+          }
+        : null,
+    },
+  };
+};
+
 export default {
   createPaymentOrder,
   verifyPayment,
@@ -877,4 +1049,5 @@ export default {
   handleWebhookEvent,
   getPaymentStatus,
   getPaymentConfig,
+  simulatePlanPurchaseDev,
 };

@@ -11,3 +11,21 @@ coverage
 # OS noise
 .DS_Store
 Thumbs.db
+.vscode
+.DS_Store
+
+# Environment files (all layers) — never commit actual secrets
+.env
+.env.local
+.env.*.local
+server/.env
+server/.env.local
+server/.env.*.local
+client/.env
+client/.env.local
+client/.env.*.local
+
+# Keep .env.example files committed (placeholder values only, no real secrets)
+!.env.example
+!server/.env.example
+!client/.env.example

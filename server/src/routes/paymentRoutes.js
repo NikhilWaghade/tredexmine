@@ -11,8 +11,9 @@ import {
   listReconciliationRequestsController,
   getReconciliationRequestController,
   reviewReconciliationRequestController,
+  simulatePlanPurchaseDevController,
 } from '../controllers/paymentController.js';
-import { protect, authorize } from '../middleware/index.js';
+import { protect, authorize, devSimulationGuard } from '../middleware/index.js';
 import {
   validateAdminReconcileWebhook,
   validateCreateReconciliationRequest,
@@ -102,5 +103,14 @@ router.get('/config', protect, getConfig);
 router.post('/create-order', protect, financialLimiter, createOrder);
 router.post('/verify', protect, financialLimiter, verifyPayment);
 router.get('/order/:orderId', protect, getOrderStatus);
+
+// Development-only payment & referral simulation route
+router.post(
+  '/dev-simulate-plan-purchase',
+  devSimulationGuard,
+  protect,
+  financialLimiter,
+  simulatePlanPurchaseDevController
+);
 
 export default router;

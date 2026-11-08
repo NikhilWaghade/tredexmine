@@ -4,5 +4,6 @@ export * as walletService from './walletService';
 export * as authService from './authService';
 export * as paymentService from './paymentService';
 export * as dashboardService from './dashboardService';
+export * as referralService from './referralService';
 
 

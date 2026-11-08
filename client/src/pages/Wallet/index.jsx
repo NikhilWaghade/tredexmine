@@ -202,7 +202,7 @@ export function WalletPage() {
           key: keyId,
           amount: Math.round(amountNum * 100),
           currency: 'INR',
-          name: 'TreadExMine',
+          name: 'Minetrades',
           description: `Wallet Deposit (Test Mode) - Ref: ${intentData.depositReference}`,
           order_id: intentData.orderId,
           prefill: {

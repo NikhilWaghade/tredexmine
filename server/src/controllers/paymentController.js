@@ -340,6 +340,34 @@ export const reviewReconciliationRequestController = async (req, res, next) => {
   }
 };
 
+/**
+ * Development-only plan purchase simulation controller.
+ * Triggers plan activation and referral rewards without Razorpay.
+ * @route POST /api/v1/payments/dev-simulate-plan-purchase
+ */
+export const simulatePlanPurchaseDevController = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const { planId, outcome, idempotencyKey } = req.body;
+
+    const result = await paymentService.simulatePlanPurchaseDev(userId, {
+      planId,
+      outcome: outcome || 'success',
+      idempotencyKey,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    next(error);
+  }
+};
+
 export default {
   createOrder,
   verifyPayment,
@@ -352,4 +380,5 @@ export default {
   listReconciliationRequestsController,
   getReconciliationRequestController,
   reviewReconciliationRequestController,
+  simulatePlanPurchaseDevController,
 };

@@ -968,6 +968,12 @@ export const verifyDeposit = async (
   let isSignatureValid = false;
   const effectiveOrderId = orderId || deposit.orderId;
 
+  if (orderId && deposit.orderId && String(orderId).trim() !== String(deposit.orderId).trim()) {
+    const error = new Error('Gateway order ID does not match deposit record');
+    error.statusCode = 400;
+    throw error;
+  }
+
   if (deposit.provider === 'razorpay') {
     isSignatureValid = verifyPaymentSignature({
       orderId: effectiveOrderId,

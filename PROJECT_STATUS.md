@@ -1,4 +1,4 @@
-# TreadExMine Project Status
+# Minetrades Project Status
 
 Progress: 35%
 

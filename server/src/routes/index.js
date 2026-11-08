@@ -5,6 +5,7 @@ import walletRoutes from './walletRoutes.js';
 import planRoutes from './planRoutes.js';
 import paymentRoutes from './paymentRoutes.js';
 import dashboardRoutes from './dashboardRoutes.js';
+import referralRoutes from './referralRoutes.js';
 
 const router = Router();
 
@@ -25,6 +26,9 @@ router.use('/payments', paymentRoutes);
 
 // Dashboard routes: /api/v1/dashboard/*
 router.use('/dashboard', dashboardRoutes);
+
+// Referral routes: /api/v1/referrals/*
+router.use('/referrals', referralRoutes);
 
 export default router;
 

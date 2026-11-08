@@ -88,9 +88,29 @@ export const adminReconcileLimiter = rateLimit({
   },
 });
 
+/**
+ * Public referral code validation limiter:
+ *   GET /api/v1/referrals/validate/:code
+ *
+ * 30 requests per 15 minutes per IP to mitigate enumeration attacks.
+ */
+export const referralValidationLimiter = rateLimit({
+  windowMs: FINANCIAL_WINDOW_MS,
+  max: 30,
+  keyGenerator: ipKeyGenerator,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipNonProduction,
+  message: {
+    success: false,
+    message: 'Too many referral code validation attempts, please try again after 15 minutes.',
+  },
+});
+
 export default {
   financialLimiter,
   adminReconcileLimiter,
+  referralValidationLimiter,
   financialKeyGenerator,
   adminKeyGenerator,
 };

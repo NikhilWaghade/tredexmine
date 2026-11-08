@@ -66,7 +66,7 @@ const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   // Skip rate limiting in non-production environments (prevents shared in-memory counter collisions in tests)
-  skip: () => process.env.NODE_ENV !== 'production',  message: {
+  skip: () => process.env.NODE_ENV !== 'production', message: {
     success: false,
     message: 'Too many requests from this IP, please try again after 15 minutes.',
   },
@@ -82,8 +82,18 @@ app.use(
     },
   })
 );
+
+
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
+
+
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "TreadExMine API is running",
+  });
+});
 
 // Mount API v1 Routes
 app.use('/api/v1', apiRoutes);

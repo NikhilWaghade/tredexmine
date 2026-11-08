@@ -173,11 +173,13 @@ export function DashboardPage() {
       }
     };
 
+    window.addEventListener('minetrades:refresh', handleRefresh);
     window.addEventListener('treadex:refresh', handleRefresh);
     window.addEventListener('wallet:updated', handleRefresh);
 
     return () => {
       isMounted = false;
+      window.removeEventListener('minetrades:refresh', handleRefresh);
       window.removeEventListener('treadex:refresh', handleRefresh);
       window.removeEventListener('wallet:updated', handleRefresh);
     };
@@ -411,7 +413,7 @@ export function DashboardPage() {
           <div>
             <span className="font-semibold text-white block mb-0.5">Verified Ledger Policy</span>
             <span className="text-gray-400 leading-relaxed">
-              TreadExMine strictly derives income metrics from authenticated, settled transaction records.
+              Minetrades strictly derives income metrics from authenticated, settled transaction records.
               In accordance with financial compliance, unverified or fabricated daily ROI is never calculated or credited.
             </span>
           </div>

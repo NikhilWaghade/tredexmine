@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 /**
- * Foundation Axios client instance configured for TreadExMine
+ * Foundation Axios client instance configured for Minetrades
  * Matches backend /api/v1 prefix and securely attaches Bearer token if present
  */
 const api = axios.create({
