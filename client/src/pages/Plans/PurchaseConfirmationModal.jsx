@@ -132,7 +132,7 @@ export function PurchaseConfirmationModal({
         key: keyId,
         amount: amountInPaise,
         currency: currency || 'INR',
-        name: 'TreadExMine',
+        name: 'Minetrades',
         description: `Activation for ${plan.name} Node (${plan.durationDays} Days)`,
         order_id: orderId,
         prefill: {
@@ -242,6 +242,51 @@ export function PurchaseConfirmationModal({
     }
   };
 
+  // --- Local Development-Only Referral & Payment Simulation ---
+  const isDevSimulationAvailable =
+    Boolean(import.meta.env.DEV) &&
+    import.meta.env.VITE_ENABLE_TEST_PAYMENT_SIMULATION !== 'false';
+
+  const handleSimulatePurchase = async (outcome = 'success') => {
+    setCheckoutState('verifying');
+    setError(null);
+    setStatusMessage(
+      outcome === 'success'
+        ? 'Simulating successful payment & triggering referral rewards...'
+        : 'Simulating failed payment response...'
+    );
+
+    try {
+      const response = await paymentService.simulatePlanPurchaseDev(plan._id, outcome);
+
+      if (outcome === 'success' && response.success) {
+        setCheckoutState('success');
+        setActivatedData(response.data);
+        if (onSuccess) {
+          await onSuccess(response);
+        }
+      } else if (outcome === 'failure') {
+        setCheckoutState('idle');
+        setStatusMessage('');
+        setError(
+          response.message ||
+            'Simulated payment failure: payment marked failed, no plan activated, and no reward credited.'
+        );
+      } else {
+        setCheckoutState('error');
+        setError(response.message || 'Payment simulation failed');
+      }
+    } catch (err) {
+      setCheckoutState('error');
+      const apiMsg =
+        err.response?.data?.message ||
+        (err.request
+          ? 'Network error: Unable to contact server for test simulation.'
+          : err.message || 'Simulation error occurred');
+      setError(apiMsg);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
       {/* Backdrop */}
@@ -299,6 +344,12 @@ export function PurchaseConfirmationModal({
                 <div className="flex justify-between text-gray-400 pt-2 border-t border-white/10 text-[11px]">
                   <span>Payment Reference:</span>
                   <span className="text-gray-300 font-mono">{activatedData.payment.paymentId}</span>
+                </div>
+              )}
+              {activatedData?.referralReward && activatedData.referralReward.amount && (
+                <div className="flex justify-between text-emerald-400 pt-2 border-t border-emerald-800/40 text-[11px] font-semibold">
+                  <span>Referral Reward:</span>
+                  <span>₹{activatedData.referralReward.amount} Credited to Referrer</span>
                 </div>
               )}
             </div>
@@ -507,6 +558,55 @@ export function PurchaseConfirmationModal({
                     )}
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* Development-Only Payment & Referral Simulation Controls */}
+            {isDevSimulationAvailable && (
+              <div
+                id="dev-simulation-panel"
+                className="mb-5 p-4 rounded-xl bg-purple-950/40 border border-purple-500/40 text-xs shadow-inner"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="font-bold uppercase tracking-wider text-[11px] text-purple-200">
+                      Developer Test Simulation
+                    </span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded bg-purple-900/60 border border-purple-700/50 text-[10px] text-purple-300 font-mono">
+                    DEV ONLY
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-300 mb-3 leading-relaxed">
+                  Test plan purchase and referral reward distribution without Razorpay API keys or real payments.
+                </p>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    id="dev-simulate-success-btn"
+                    onClick={() => handleSimulatePurchase('success')}
+                    disabled={isProcessing}
+                    className="w-full py-2 px-3 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/50 text-emerald-300 text-xs font-semibold transition-all disabled:opacity-50 text-center flex items-center justify-center gap-1.5 shadow-sm"
+                  >
+                    <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Simulate Success
+                  </button>
+                  <button
+                    type="button"
+                    id="dev-simulate-failure-btn"
+                    onClick={() => handleSimulatePurchase('failure')}
+                    disabled={isProcessing}
+                    className="w-full py-2 px-3 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 border border-rose-500/50 text-rose-300 text-xs font-semibold transition-all disabled:opacity-50 text-center flex items-center justify-center gap-1.5 shadow-sm"
+                  >
+                    <svg className="w-3.5 h-3.5 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Simulate Failure
+                  </button>
+                </div>
               </div>
             )}
 

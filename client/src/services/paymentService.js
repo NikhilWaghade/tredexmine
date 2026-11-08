@@ -73,10 +73,32 @@ export const getOrderStatus = async (orderId) => {
   return response.data;
 };
 
+/**
+ * Simulate plan purchase for local development and referral testing
+ * Available only in development mode when backend simulation is enabled
+ * @param {string} planId - MongoDB Plan ObjectId
+ * @param {'success'|'failure'} [outcome='success'] - Simulation outcome
+ * @param {string} [idempotencyKey] - Optional client idempotency key
+ * @returns {Promise<Object>}
+ */
+export const simulatePlanPurchaseDev = async (
+  planId,
+  outcome = 'success',
+  idempotencyKey = null
+) => {
+  const response = await api.post('/payments/dev-simulate-plan-purchase', {
+    planId,
+    outcome,
+    idempotencyKey,
+  });
+  return response.data;
+};
+
 export default {
   loadRazorpayScript,
   createPaymentOrder,
   verifyPayment,
   getPaymentConfig,
   getOrderStatus,
+  simulatePlanPurchaseDev,
 };

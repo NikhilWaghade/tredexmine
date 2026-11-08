@@ -1,4 +1,4 @@
-# TreadExMine Development Rules
+# Minetrades Development Rules
 
 Before every task:
 

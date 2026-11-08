@@ -4,7 +4,7 @@ import validator from 'validator';
  * Middleware validator for user registration requests
  */
 export const registerValidation = (req, res, next) => {
-  const { name, email, password, role, referredBy } = req.body || {};
+  const { name, email, password, role, referredBy, referralCode } = req.body || {};
   const errors = [];
 
   // Validate Name
@@ -31,6 +31,21 @@ export const registerValidation = (req, res, next) => {
   // Reject requests that explicitly contain a role field
   if (role !== undefined || (req.body && 'role' in req.body)) {
     errors.push('Role cannot be specified during registration');
+  }
+
+  // Validate Referral Code if provided (optional)
+  const candidateCode = referralCode !== undefined ? referralCode : referredBy;
+  if (candidateCode !== undefined && candidateCode !== null && candidateCode !== '') {
+    if (typeof candidateCode !== 'string') {
+      errors.push('Referral code must be a string');
+    } else {
+      const trimmed = candidateCode.trim();
+      if (trimmed.length > 30) {
+        errors.push('Referral code cannot exceed 30 characters');
+      } else if (!/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+        errors.push('Referral code contains invalid characters');
+      }
+    }
   }
 
   // Return validation error response if any rules failed

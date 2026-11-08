@@ -87,7 +87,7 @@ export function HomePage() {
 
             {/* Subheading */}
             <p className="text-lg sm:text-xl text-gray-300 max-w-2xl mb-10 leading-relaxed font-normal">
-              TreadExMine provides institutional-grade computing infrastructure designed for
+              Minetrades provides institutional-grade computing infrastructure designed for
               continuous performance, hardware resilience, and transparent node orchestration.
             </p>
 
@@ -184,7 +184,7 @@ export function HomePage() {
         <Container>
           <div className="relative rounded-3xl overflow-hidden p-8 sm:p-14 border border-purple-800/40 bg-gradient-to-r from-purple-950/40 via-black to-purple-950/40 text-center flex flex-col items-center">
             <h2 className="text-2xl sm:text-4xl font-extrabold text-white mb-4">
-              Ready to Discover TreadExMine?
+              Ready to Discover Minetrades?
             </h2>
             <p className="text-gray-300 text-base sm:text-lg max-w-2xl mb-8 leading-relaxed">
               Explore our architecture or contact our engineering specialists for detailed technical

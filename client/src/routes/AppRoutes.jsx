@@ -9,11 +9,22 @@ import { ContactPage } from '../pages/Contact';
 import { NotFoundPage } from '../pages/NotFound';
 import { AdminPlansPage, AdminWithdrawalsPage } from '../pages/Admin';
 import { WalletPage } from '../pages/Wallet';
+import { ReferralsPage } from '../pages/Referrals';
 import { ProtectedRoute } from '../components/auth';
 import { useAuth } from '../context';
 import { ROUTES } from '../constants';
 
 function LoginRoute() {
+  const { isAuthenticated, openAuthModal } = useAuth();
+  useEffect(() => {
+    if (!isAuthenticated) {
+      openAuthModal();
+    }
+  }, [isAuthenticated, openAuthModal]);
+  return <Navigate to={isAuthenticated ? ROUTES.DASHBOARD : ROUTES.HOME} replace />;
+}
+
+function RegisterRoute() {
   const { isAuthenticated, openAuthModal } = useAuth();
   useEffect(() => {
     if (!isAuthenticated) {
@@ -46,6 +57,14 @@ export function AppRoutes() {
           }
         />
         <Route
+          path={ROUTES.REFERRALS}
+          element={
+            <ProtectedRoute>
+              <ReferralsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path={ROUTES.ADMIN_PLANS}
           element={
             <ProtectedRoute requireAdmin={true}>
@@ -62,6 +81,7 @@ export function AppRoutes() {
           }
         />
         <Route path={ROUTES.LOGIN} element={<LoginRoute />} />
+        <Route path={ROUTES.REGISTER} element={<RegisterRoute />} />
         <Route path={ROUTES.ABOUT} element={<AboutPage />} />
         <Route path={ROUTES.CONTACT} element={<ContactPage />} />
         <Route path={ROUTES.NOT_FOUND} element={<NotFoundPage />} />

@@ -33,3 +33,6 @@ export { default as WebhookEvent } from './WebhookEvent.js';
 
 export * from './ReconciliationRequest.js';
 export { default as ReconciliationRequest } from './ReconciliationRequest.js';
+
+export * from './ReferralReward.js';
+export { default as ReferralReward } from './ReferralReward.js';

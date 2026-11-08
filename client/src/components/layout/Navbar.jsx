@@ -32,13 +32,13 @@ export function Navbar() {
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#7A56D6] to-purple-400 p-0.5 shadow-md shadow-[#7A56D6]/40 group-hover:shadow-lg group-hover:shadow-[#7A56D6]/60 transition-all duration-300">
               <div className="w-full h-full bg-black/90 rounded-[10px] flex items-center justify-center">
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-200 to-white font-extrabold text-xl tracking-tighter">
-                  TX
+                  MT
                 </span>
               </div>
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg tracking-tight text-white group-hover:text-purple-300 transition-colors">
-                TreadEx<span className="text-[#7A56D6]">Mine</span>
+                Mine<span className="text-[#7A56D6]">trades</span>
               </span>
               <span className="text-[10px] uppercase tracking-widest text-gray-400 font-medium">
                 Cloud Computing
@@ -86,6 +86,24 @@ export function Navbar() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
                   </svg>
                   <span>Dashboard</span>
+                </NavLink>
+
+                {/* Refer & Earn NavLink */}
+                <NavLink
+                  to={ROUTES.REFERRALS}
+                  className={({ isActive }) =>
+                    cn(
+                      'px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border',
+                      isActive
+                        ? 'bg-[#7A56D6] text-white border-[#7A56D6] shadow-sm shadow-[#7A56D6]/40'
+                        : 'bg-white/5 hover:bg-white/10 text-gray-200 border-white/10 hover:text-white'
+                    )
+                  }
+                >
+                  <svg className="w-3.5 h-3.5 text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>Refer & Earn</span>
                 </NavLink>
 
                 {/* Admin Plans & Withdrawals Links (Authorized Admins Only) */}
@@ -255,6 +273,19 @@ export function Navbar() {
                     <span className="font-bold text-emerald-400">
                       ₹{wallet?.balance != null ? Number(wallet.balance).toFixed(2) : '0.00'}
                     </span>
+                  </Link>
+                  <Link
+                    to={ROUTES.REFERRALS}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-purple-950/40 border border-purple-800/30 text-purple-200 text-sm font-semibold hover:border-[#7A56D6]"
+                  >
+                    <span className="flex items-center gap-2">
+                      <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Refer & Earn (₹300 Bonus)
+                    </span>
+                    <span>→</span>
                   </Link>
 
                   {user?.role === 'admin' && (

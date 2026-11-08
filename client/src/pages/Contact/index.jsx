@@ -32,7 +32,7 @@ export function ContactPage() {
     {
       title: 'Technical Support',
       description: 'Questions regarding infrastructure specifications and node health status.',
-      contact: 'support@treadexmine.io',
+      contact: 'support@minetrades.io',
       icon: (
         <svg className="w-5 h-5 text-[#7A56D6]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -42,7 +42,7 @@ export function ContactPage() {
     {
       title: 'Institutional Inquiries',
       description: 'Custom cluster provisioning, dedicated computing capacity, and partnerships.',
-      contact: 'enterprise@treadexmine.io',
+      contact: 'enterprise@minetrades.io',
       icon: (
         <svg className="w-5 h-5 text-[#7A56D6]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
@@ -74,7 +74,7 @@ export function ContactPage() {
               Contact <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#7A56D6] to-purple-300">Support & Team</span>
             </h1>
             <p className="text-lg sm:text-xl text-gray-300 leading-relaxed">
-              Have inquiries about TreadExMine platform architecture, institutional compute,
+              Have inquiries about Minetrades platform architecture, institutional compute,
               or integration roadmap? Connect with our team.
             </p>
           </div>
@@ -125,7 +125,7 @@ export function ContactPage() {
                     </div>
                     <h3 className="text-lg font-bold text-white">Inquiry Received</h3>
                     <p className="text-sm text-gray-300 max-w-md">
-                      Thank you for contacting TreadExMine. Your message has been recorded.
+                      Thank you for contacting Minetrades. Your message has been recorded.
                     </p>
                     <Button variant="outline" size="sm" onClick={resetForm} className="mt-2">
                       Send Another Message

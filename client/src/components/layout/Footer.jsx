@@ -15,12 +15,12 @@ export function Footer() {
               <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#7A56D6] to-purple-400 p-0.5 shadow-md shadow-[#7A56D6]/30">
                 <div className="w-full h-full bg-black/90 rounded-[10px] flex items-center justify-center">
                   <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-200 to-white font-extrabold text-lg tracking-tighter">
-                    TX
+                    MT
                   </span>
                 </div>
               </div>
               <span className="font-bold text-xl tracking-tight text-white">
-                TreadEx<span className="text-[#7A56D6]">Mine</span>
+                Mine<span className="text-[#7A56D6]">trades</span>
               </span>
             </Link>
             <p className="text-gray-400 text-sm max-w-md leading-relaxed">
@@ -91,7 +91,7 @@ export function Footer() {
 
         {/* Bottom Bar */}
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
-          <p>© {currentYear} TreadExMine Platform. All rights reserved.</p>
+          <p>© {currentYear} Minetrades Platform. All rights reserved.</p>
           <div className="flex items-center gap-6">
             <span>Enterprise Infrastructure Foundation</span>
             <span>v1.0.0</span>

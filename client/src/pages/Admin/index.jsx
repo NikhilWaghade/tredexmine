@@ -148,7 +148,7 @@ export function AdminPlansPage() {
               <span className="px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40 rounded">
                 Admin Panel
               </span>
-              <span className="text-xs text-gray-400">TreadExMine Cloud Computing</span>
+              <span className="text-xs text-gray-400">Minetrades Cloud Computing</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               Plan Catalogue Management

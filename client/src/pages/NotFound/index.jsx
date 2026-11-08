@@ -22,7 +22,7 @@ export function NotFoundPage() {
           </h1>
 
           <p className="text-gray-400 text-sm sm:text-base mb-8 max-w-md leading-relaxed">
-            The requested destination route could not be found within the TreadExMine network.
+            The requested destination route could not be found within the Minetrades network.
             Please verify the URL or return to the platform home.
           </p>
 

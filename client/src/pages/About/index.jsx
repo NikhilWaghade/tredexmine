@@ -35,7 +35,7 @@ export function AboutPage() {
               Our Identity & Mission
             </span>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white tracking-tight mb-6 leading-tight">
-              About <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#7A56D6] to-purple-300">TreadExMine</span>
+              About <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#7A56D6] to-purple-300">Minetrades</span>
             </h1>
             <p className="text-lg sm:text-xl text-gray-300 leading-relaxed font-normal">
               Pioneering high-density distributed computing architectures to provide accessible,

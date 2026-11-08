@@ -1,4 +1,4 @@
-# TreadExMine
+# Minetrades
 
 Modern Trading & Investment Platform
 

@@ -1,18 +1,104 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../context';
 import { Button } from '../common';
+import { referralService } from '../../services';
 
 export function AuthModal() {
+  const location = useLocation();
   const { isAuthModalOpen, closeAuthModal, login, register, authError, setAuthError } = useAuth();
-  const [mode, setMode] = useState('login'); // 'login' | 'register'
+
+  const [mode, setMode] = useState(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      return sp.get('ref') || window.location.pathname.includes('/register') ? 'register' : 'login';
+    } catch {
+      return 'login';
+    }
+  });
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    password: '',
-    referredBy: '',
+  const [formData, setFormData] = useState(() => {
+    let initialRef = '';
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const param = sp.get('ref');
+      if (param) {
+        initialRef = param.trim().toUpperCase();
+      }
+    } catch {
+      initialRef = '';
+    }
+    return {
+      name: '',
+      email: '',
+      password: '',
+      referredBy: initialRef,
+    };
   });
+
+  const [referralValidation, setReferralValidation] = useState({
+    checking: false,
+    valid: null,
+    referrerName: null,
+    message: null,
+  });
+
+  // Live validator for entered referral code
+  const validateCodeDirectly = async (code) => {
+    if (!code || code.trim().length < 4) {
+      setReferralValidation({ checking: false, valid: null, referrerName: null, message: null });
+      return;
+    }
+    setReferralValidation((prev) => ({ ...prev, checking: true }));
+    try {
+      const res = await referralService.validateReferralCode(code.trim().toUpperCase());
+      if (res.success && res.data?.valid) {
+        setReferralValidation({
+          checking: false,
+          valid: true,
+          referrerName: res.data.referrerName,
+          message: `Referral applied from ${res.data.referrerName}`,
+        });
+      } else {
+        setReferralValidation({
+          checking: false,
+          valid: false,
+          referrerName: null,
+          message: 'Referral code not found',
+        });
+      }
+    } catch {
+      setReferralValidation({
+        checking: false,
+        valid: false,
+        referrerName: null,
+        message: 'Invalid referral code',
+      });
+    }
+  };
+
+  // Validate initial referral code if present when modal opens
+  useEffect(() => {
+    if (!isAuthModalOpen) return;
+    let isMounted = true;
+    Promise.resolve().then(() => {
+      if (!isMounted) return;
+      try {
+        const sp = new URLSearchParams(location.search);
+        const refParam = (sp.get('ref') || '').trim().toUpperCase();
+        if (refParam) {
+          validateCodeDirectly(refParam);
+        }
+      } catch (err) {
+        void err;
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthModalOpen, location.search]);
 
   if (!isAuthModalOpen) return null;
 
@@ -20,6 +106,15 @@ export function AuthModal() {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
     if (authError) setAuthError(null);
+
+    if (name === 'referredBy') {
+      const trimmed = value.trim().toUpperCase();
+      if (!trimmed) {
+        setReferralValidation({ checking: false, valid: null, referrerName: null, message: null });
+      } else if (trimmed.length >= 4) {
+        validateCodeDirectly(trimmed);
+      }
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -33,7 +128,7 @@ export function AuthModal() {
           name: formData.name,
           email: formData.email,
           password: formData.password,
-          referredBy: formData.referredBy || undefined,
+          referredBy: formData.referredBy?.trim() ? formData.referredBy.trim().toUpperCase() : undefined,
         });
       }
     } catch {
@@ -70,12 +165,12 @@ export function AuthModal() {
           <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-gradient-to-tr from-[#7A56D6] to-purple-400 p-0.5 shadow-md shadow-[#7A56D6]/30">
             <div className="w-full h-full bg-black/90 rounded-[10px] flex items-center justify-center">
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-200 to-white font-extrabold text-xl">
-                TX
+                MT
               </span>
             </div>
           </div>
           <h3 className="text-2xl font-bold text-white tracking-tight">
-            {mode === 'login' ? 'Sign In to TreadExMine' : 'Create an Account'}
+            {mode === 'login' ? 'Sign In to Minetrades' : 'Create an Account'}
           </h3>
           <p className="text-sm text-gray-400 mt-1">
             {mode === 'login'
@@ -177,17 +272,44 @@ export function AuthModal() {
 
           {mode === 'register' && (
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-300 mb-1.5">
-                Referral Code (Optional)
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-300">
+                  Referral Code (Optional)
+                </label>
+                {referralValidation.checking && (
+                  <span className="text-[11px] text-purple-400 animate-pulse">Verifying...</span>
+                )}
+              </div>
               <input
                 type="text"
                 name="referredBy"
                 value={formData.referredBy}
                 onChange={handleChange}
                 placeholder="TXM-..."
-                className="w-full px-4 py-2.5 rounded-xl bg-white/[0.04] border border-purple-900/40 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#7A56D6] focus:border-transparent transition-all"
+                className={`w-full px-4 py-2.5 rounded-xl bg-white/[0.04] text-white placeholder-gray-500 text-sm focus:outline-none transition-all uppercase ${
+                  referralValidation.valid === true
+                    ? 'border-emerald-500/80 focus:ring-2 focus:ring-emerald-500'
+                    : referralValidation.valid === false
+                    ? 'border-rose-500/80 focus:ring-2 focus:ring-rose-500'
+                    : 'border-purple-900/40 focus:ring-2 focus:ring-[#7A56D6]'
+                }`}
               />
+              {referralValidation.valid === true && (
+                <p className="mt-1.5 text-xs text-emerald-400 flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span>{referralValidation.message}</span>
+                </p>
+              )}
+              {referralValidation.valid === false && (
+                <p className="mt-1.5 text-xs text-rose-400 flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  <span>{referralValidation.message}</span>
+                </p>
+              )}
             </div>
           )}
 

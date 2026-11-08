@@ -18,10 +18,11 @@ import { createWalletForUser } from '../../services/walletService.js';
  */
 export const register = async (req, res, next) => {
   try {
-    const { name, email, password, referredBy } = req.body;
+    const { name, email, password, referredBy, referralCode } = req.body;
+    const normalizedEmail = email.toLowerCase().trim();
 
     // 1. Check if email is already registered
-    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+    const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -30,23 +31,47 @@ export const register = async (req, res, next) => {
     }
 
     // 2. Validate referral code if provided
-    let verifiedReferredBy = null;
-    if (referredBy) {
+    const rawReferralCode = (referralCode !== undefined ? referralCode : referredBy) || '';
+    const normalizedCode = typeof rawReferralCode === 'string' ? rawReferralCode.trim().toUpperCase() : '';
+
+    let verifiedReferrer = null;
+    let codeUsed = null;
+    let rewardStatus = 'NOT_ELIGIBLE';
+
+    if (normalizedCode.length > 0) {
       const referringUser = await User.findOne({
-        referralCode: referredBy.trim().toUpperCase(),
+        referralCode: normalizedCode,
       });
-      if (referringUser) {
-        verifiedReferredBy = referringUser.referralCode;
+
+      if (!referringUser) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid referral code',
+        });
       }
+
+      // Prevent self-referral via matching identity (e.g. same email address)
+      if (referringUser.email && referringUser.email.toLowerCase().trim() === normalizedEmail) {
+        return res.status(400).json({
+          success: false,
+          message: 'Self-referral is not permitted',
+        });
+      }
+
+      verifiedReferrer = referringUser._id;
+      codeUsed = referringUser.referralCode;
+      rewardStatus = 'PENDING';
     }
 
     // 3. Create user (password will be hashed via pre-save hook; role is always strictly 'user')
     const user = await User.create({
       name: name.trim(),
-      email: email.toLowerCase().trim(),
+      email: normalizedEmail,
       password,
       role: 'user',
-      referredBy: verifiedReferredBy,
+      referredBy: verifiedReferrer,
+      referralCodeUsed: codeUsed,
+      referralRewardStatus: rewardStatus,
     });
 
     // 4. Automatically create linked wallet for user

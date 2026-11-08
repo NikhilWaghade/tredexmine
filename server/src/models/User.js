@@ -58,12 +58,28 @@ const userSchema = new mongoose.Schema(
       sparse: true,
       trim: true,
       uppercase: true,
+      index: true,
     },
     referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+    referralCodeUsed: {
       type: String,
       default: null,
       trim: true,
       uppercase: true,
+    },
+    referralRewardStatus: {
+      type: String,
+      enum: {
+        values: ['NOT_ELIGIBLE', 'PENDING', 'REWARDED'],
+        message: 'referralRewardStatus must be NOT_ELIGIBLE, PENDING, or REWARDED',
+      },
+      default: 'NOT_ELIGIBLE',
+      index: true,
     },
   },
   {
@@ -79,9 +95,38 @@ userSchema.pre('save', async function () {
     this.password = await bcryptjs.hash(this.password, salt);
   }
 
+  // Prevent mutating referralCode or referredBy after initial creation
+  if (!this.isNew) {
+    if (this.isModified('referralCode')) {
+      throw new Error('Referral code cannot be modified after registration');
+    }
+    if (this.isModified('referredBy')) {
+      throw new Error('Referral attribution cannot be modified after registration');
+    }
+    if (this.isModified('referralCodeUsed')) {
+      throw new Error('Used referral code record is immutable');
+    }
+  }
+
   // Generate unique referral code if missing
   if (!this.referralCode) {
     this.referralCode = generateUniqueReferralCode();
+  }
+});
+
+// Guard: Prevent modification of referral fields via direct update queries
+userSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function () {
+  const update = this.getUpdate();
+  if (update) {
+    if (update.$set) {
+      delete update.$set.referralCode;
+      delete update.$set.referredBy;
+      delete update.$set.referralCodeUsed;
+    } else {
+      delete update.referralCode;
+      delete update.referredBy;
+      delete update.referralCodeUsed;
+    }
   }
 });
 
