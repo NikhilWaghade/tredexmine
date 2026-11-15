@@ -13,6 +13,7 @@ import {
   verifyPaymentSignature,
 } from '../config/razorpay.js';
 import { isTransactionSupported } from './planService.js';
+import { encryptPayoutData, decryptPayoutData } from '../utils/cryptoService.js';
 
 /**
  * Secret key used to sign and verify mock development deposits
@@ -1035,13 +1036,14 @@ export const getDepositsByUserId = async (userId, options = {}) => {
  * Valid withdrawal status transitions state machine
  */
 export const VALID_WITHDRAWAL_TRANSITIONS = {
-  PENDING: ['APPROVED', 'REJECTED', 'CANCELLED'],
-  APPROVED: ['PROCESSING', 'REJECTED'],
-  PROCESSING: ['COMPLETED', 'FAILED'],
+  PENDING: ['APPROVED', 'REJECTED', 'CANCELLED', 'PROCESSING', 'QUARANTINED'],
+  APPROVED: ['PROCESSING', 'REJECTED', 'QUARANTINED'],
+  PROCESSING: ['COMPLETED', 'FAILED', 'APPROVED', 'REJECTED', 'QUARANTINED'],
   REJECTED: [],
   COMPLETED: [],
   FAILED: [],
   CANCELLED: [],
+  QUARANTINED: ['PENDING', 'PROCESSING', 'APPROVED', 'REJECTED'],
 };
 
 /**
@@ -1185,7 +1187,7 @@ export const createWithdrawalRequest = async (
     // 7. Generate unique withdrawal reference
     const withdrawalReference = `WTH-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
-    // 8. Sanitize payout details: mask sensitive identifier
+    // 8. Sanitize payout details: mask sensitive identifier & encrypt sensitive credentials at rest
     const rawIdentifier =
       payoutDetails?.identifier ||
       payoutDetails?.upiId ||
@@ -1193,6 +1195,21 @@ export const createWithdrawalRequest = async (
       payoutDetails?.maskedIdentifier ||
       '';
     const maskedIdentifier = maskPayoutIdentifier(rawIdentifier);
+
+    let encryptedPayload = { encryptedData: '', iv: '', tag: '' };
+    if (payoutMethod === 'bank_transfer') {
+      encryptedPayload = encryptPayoutData({
+        accountHolderName: String(payoutDetails?.accountHolderName || '').trim(),
+        bankName: String(payoutDetails?.bankName || '').trim(),
+        accountNumber: String(payoutDetails?.accountNumber || rawIdentifier).trim(),
+        ifscCode: String(payoutDetails?.ifscCode || '').trim().toUpperCase(),
+      });
+    } else {
+      encryptedPayload = encryptPayoutData({
+        upiId: String(payoutDetails?.upiId || rawIdentifier).trim(),
+        accountHolderName: String(payoutDetails?.accountHolderName || '').trim(),
+      });
+    }
 
     // 9. Create Withdrawal record with status 'PENDING'
     const withdrawalData = {
@@ -1206,8 +1223,20 @@ export const createWithdrawalRequest = async (
       payoutMethod: payoutMethod === 'bank_transfer' ? 'bank_transfer' : 'upi',
       payoutDetails: {
         accountHolderName: String(payoutDetails?.accountHolderName || '').trim().slice(0, 80),
+        bankName: String(payoutDetails?.bankName || '').trim().slice(0, 80),
         maskedIdentifier,
+        encryptedData: encryptedPayload.encryptedData,
+        encryptionIv: encryptedPayload.iv,
+        encryptionTag: encryptedPayload.tag,
       },
+      statusHistory: [
+        {
+          status: 'PENDING',
+          changedBy: userId,
+          changedAt: new Date(),
+          notes: 'Withdrawal request created by user',
+        },
+      ],
       refundIssued: false,
       isTest: true,
     };
@@ -2518,13 +2547,23 @@ export const updateWithdrawalStatusAdmin = async (adminId, withdrawalId, { statu
       };
     }
 
-    // For non-FAILED transitions (e.g. COMPLETED, PROCESSING):
+    // If transitioning to REJECTED, invoke standard atomic refund procedure
+    if (targetStatus === 'REJECTED') {
+      if (ownSession && session) {
+        await session.abortTransaction();
+      }
+      return rejectWithdrawalAdmin(adminId, withdrawalId, trimmedNotes);
+    }
+
+    // For non-FAILED transitions (e.g. COMPLETED, PROCESSING, APPROVED, PENDING, QUARANTINED):
     const withdrawal = await Withdrawal.findById(withdrawalId);
     if (!withdrawal) {
       const error = new Error('Withdrawal request not found');
       error.statusCode = 404;
       throw error;
     }
+
+    const previousDocStatus = withdrawal.status;
 
     const allowedNext = VALID_WITHDRAWAL_TRANSITIONS[withdrawal.status] || [];
     if (!allowedNext.includes(targetStatus)) {
@@ -2550,13 +2589,58 @@ export const updateWithdrawalStatusAdmin = async (adminId, withdrawalId, { statu
       );
     }
 
+    // Handle QUARANTINED state: mark manual review metadata
+    if (targetStatus === 'QUARANTINED') {
+      withdrawal.metadata = {
+        ...withdrawal.metadata,
+        reconciliationRequiresManualReview: true,
+        reconciliationReason: trimmedNotes || 'Quarantined by administrator for review',
+        quarantinedAt: new Date(),
+      };
+    } else if (withdrawal.metadata?.reconciliationRequiresManualReview) {
+      // Leaving quarantine
+      withdrawal.metadata = {
+        ...withdrawal.metadata,
+        reconciliationRequiresManualReview: false,
+      };
+    }
+
     withdrawal.status = targetStatus;
     if (trimmedNotes) {
       withdrawal.adminNotes = trimmedNotes;
     }
     withdrawal.reviewedBy = adminId;
     withdrawal.reviewedAt = new Date();
+
+    if (!Array.isArray(withdrawal.statusHistory)) {
+      withdrawal.statusHistory = [];
+    }
+    withdrawal.statusHistory.push({
+      status: targetStatus,
+      changedBy: adminId,
+      changedAt: new Date(),
+      notes: trimmedNotes || `Status updated to ${targetStatus}`,
+    });
+
     await withdrawal.save(sessionOpt);
+
+    // Record immutable audit log
+    try {
+      await AuditLog.create([
+        {
+          entityType: 'Withdrawal',
+          entityId: withdrawal._id,
+          operationReference: withdrawal.withdrawalReference,
+          action: 'WITHDRAWAL_STATUS_UPDATE',
+          performedBy: adminId,
+          reason: trimmedNotes || `Status changed from ${previousDocStatus} to ${targetStatus}`,
+          stateBefore: { status: previousDocStatus },
+          stateAfter: { status: targetStatus },
+        },
+      ], sessionOpt);
+    } catch (auditErr) {
+      // Non-blocking in test environment
+    }
 
     if (ownSession && session) {
       await session.commitTransaction();
@@ -3143,6 +3227,67 @@ export const auditWalletLedgerIntegrity = async (userIdOrWalletId, options = {})
   };
 };
 
+/**
+ * Admin: Securely reveal encrypted payout details for authorized administrators
+ * Creates an immutable AuditLog entry recording the admin access.
+ *
+ * @param {string|mongoose.Types.ObjectId} adminId
+ * @param {string|mongoose.Types.ObjectId} withdrawalId
+ * @param {string} [ipAddress]
+ * @returns {Promise<Object>} Decrypted payout information
+ */
+export const revealWithdrawalPayoutAdmin = async (adminId, withdrawalId, ipAddress = '') => {
+  const withdrawal = await Withdrawal.findById(withdrawalId).populate('user', 'name email');
+  if (!withdrawal) {
+    const error = new Error('Withdrawal request not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  let decrypted = null;
+  if (
+    withdrawal.payoutDetails?.encryptedData &&
+    withdrawal.payoutDetails?.encryptionIv &&
+    withdrawal.payoutDetails?.encryptionTag
+  ) {
+    decrypted = decryptPayoutData({
+      encryptedData: withdrawal.payoutDetails.encryptedData,
+      iv: withdrawal.payoutDetails.encryptionIv,
+      tag: withdrawal.payoutDetails.encryptionTag,
+    });
+  }
+
+  // Record admin access in append-only AuditLog
+  try {
+    await AuditLog.create({
+      entityType: 'Withdrawal',
+      entityId: withdrawal._id,
+      operationReference: withdrawal.withdrawalReference,
+      action: 'WITHDRAWAL_PAYOUT_REVEAL',
+      performedBy: adminId,
+      reason: 'Administrator unmasked and inspected payout credentials for execution',
+      stateBefore: { maskedIdentifier: withdrawal.payoutDetails?.maskedIdentifier || '' },
+      stateAfter: { revealed: true },
+      ipAddress: ipAddress || '',
+    });
+  } catch (auditErr) {
+    console.error('[FinancialAudit] Failed to log payout reveal audit:', auditErr.message);
+  }
+
+  return {
+    success: true,
+    withdrawalReference: withdrawal.withdrawalReference,
+    payoutMethod: withdrawal.payoutMethod,
+    maskedIdentifier: withdrawal.payoutDetails?.maskedIdentifier || '',
+    accountHolderName: withdrawal.payoutDetails?.accountHolderName || decrypted?.accountHolderName || '',
+    bankName: withdrawal.payoutDetails?.bankName || decrypted?.bankName || '',
+    accountNumber: decrypted?.accountNumber || '',
+    ifscCode: decrypted?.ifscCode || '',
+    upiId: decrypted?.upiId || '',
+    rawDetails: decrypted || null,
+  };
+};
+
 export default {
   createWalletForUser,
   getWalletByUserId,
@@ -3165,6 +3310,7 @@ export default {
   approveWithdrawalAdmin,
   rejectWithdrawalAdmin,
   updateWithdrawalStatusAdmin,
+  revealWithdrawalPayoutAdmin,
   generateMockDepositSignature,
   verifyMockDepositSignature,
   maskPayoutIdentifier,

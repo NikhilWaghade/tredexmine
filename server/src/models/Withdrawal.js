@@ -65,12 +65,51 @@ const withdrawalSchema = new mongoose.Schema(
         trim: true,
         default: '',
       },
+      bankName: {
+        type: String,
+        trim: true,
+        default: '',
+      },
       maskedIdentifier: {
         type: String,
         trim: true,
         default: '',
       },
+      encryptedData: {
+        type: String,
+        default: '',
+      },
+      encryptionIv: {
+        type: String,
+        default: '',
+      },
+      encryptionTag: {
+        type: String,
+        default: '',
+      },
     },
+    statusHistory: [
+      {
+        status: {
+          type: String,
+          required: true,
+        },
+        changedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          default: null,
+        },
+        changedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        notes: {
+          type: String,
+          trim: true,
+          default: '',
+        },
+      },
+    ],
     rejectionReason: {
       type: String,
       trim: true,

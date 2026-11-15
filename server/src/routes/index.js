@@ -6,6 +6,7 @@ import planRoutes from './planRoutes.js';
 import paymentRoutes from './paymentRoutes.js';
 import dashboardRoutes from './dashboardRoutes.js';
 import referralRoutes from './referralRoutes.js';
+import adminRoutes from './adminRoutes.js';
 
 const router = Router();
 
@@ -29,6 +30,9 @@ router.use('/dashboard', dashboardRoutes);
 
 // Referral routes: /api/v1/referrals/*
 router.use('/referrals', referralRoutes);
+
+// Admin routes: /api/v1/admin/*
+router.use('/admin', adminRoutes);
 
 export default router;
 

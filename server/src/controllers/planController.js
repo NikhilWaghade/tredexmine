@@ -10,6 +10,22 @@ import {
   updatePlan as updatePlanService,
   togglePlanStatus as togglePlanStatusService,
 } from '../services/planService.js';
+import { calculatePlanMetrics } from '../utils/planCalculations.js';
+
+const enrichPlan = (p) => {
+  if (!p) return null;
+  const doc = p.toObject ? p.toObject() : { ...p };
+  const metrics = calculatePlanMetrics(doc.price, doc.durationDays);
+  return {
+    ...doc,
+    dailyPercentage: metrics.dailyPercentage,
+    dailyAmount: metrics.dailyAmount,
+    illustrativeTotal: metrics.illustrativeTotal,
+    principal: metrics.principal,
+    totalWithPrincipal: metrics.totalWithPrincipal,
+    riskDisclosure: metrics.disclosure,
+  };
+};
 
 /**
  * Get all active plans sorted by sortOrder
@@ -17,7 +33,8 @@ import {
  */
 export const getPlans = async (req, res, next) => {
   try {
-    const plans = await getActivePlans();
+    const rawPlans = await getActivePlans();
+    const plans = (Array.isArray(rawPlans) ? rawPlans : []).map(enrichPlan);
 
     return res.status(200).json({
       success: true,
@@ -45,7 +62,8 @@ export const getPlanById = async (req, res, next) => {
       });
     }
 
-    const plan = await getActivePlanById(id);
+    const rawPlan = await getActivePlanById(id);
+    const plan = enrichPlan(rawPlan);
 
     return res.status(200).json({
       success: true,

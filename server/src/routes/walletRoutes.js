@@ -15,6 +15,7 @@ import {
   approveWithdrawalAdminController,
   rejectWithdrawalAdminController,
   updateWithdrawalStatusAdminController,
+  revealWithdrawalPayoutAdminController,
   reconcileDepositAdminController,
   reconcileWithdrawalAdminController,
 } from '../controllers/walletController.js';
@@ -51,6 +52,7 @@ router.patch(
   rejectWithdrawalAdminController
 );
 router.patch('/admin/withdrawals/:id/status', authorize('admin'), updateWithdrawalStatusAdminController);
+router.post('/admin/withdrawals/:id/reveal', authorize('admin'), revealWithdrawalPayoutAdminController);
 router.post(
   '/admin/withdrawals/:id/resolve-quarantine',
   authorize('admin'),

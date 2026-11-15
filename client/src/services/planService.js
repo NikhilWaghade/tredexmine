@@ -13,6 +13,8 @@ export const getPlans = async () => {
   return response.data;
 };
 
+export const getActivePlans = getPlans;
+
 /**
  * Fetch a single active plan by its ID
  * @param {string} id - Plan MongoDB ObjectId

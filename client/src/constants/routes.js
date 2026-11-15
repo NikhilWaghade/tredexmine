@@ -8,6 +8,7 @@ export const ROUTES = {
   REGISTER: '/register',
   WALLET: '/wallet',
   REFERRALS: '/referrals',
+  ADMIN: '/admin',
   ADMIN_PLANS: '/admin/plans',
   ADMIN_WITHDRAWALS: '/admin/withdrawals',
   NOT_FOUND: '*',

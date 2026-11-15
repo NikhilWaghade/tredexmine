@@ -93,6 +93,18 @@ export function AdminWithdrawalsPage() {
   const [inspectLoading, setInspectLoading] = useState(false);
   const [inspectDetails, setInspectDetails] = useState(null);
 
+  // Reveal payout details modal state
+  const [revealedItem, setRevealedItem] = useState(null);
+  const [revealLoading, setRevealLoading] = useState(false);
+
+  // Status history modal state
+  const [historyItem, setHistoryItem] = useState(null);
+
+  // Manual status transition state
+  const [transitioningItem, setTransitioningItem] = useState(null);
+  const [targetStatusChoice, setTargetStatusChoice] = useState('');
+  const [transitionNotes, setTransitionNotes] = useState('');
+
   const fetchWithdrawals = useCallback(async () => {
     setLoading(true);
     try {
@@ -247,6 +259,80 @@ export function AdminWithdrawalsPage() {
       setInspectItem(null);
     } finally {
       setInspectLoading(false);
+    }
+  };
+
+  // Reveal encrypted payout credentials (audited action)
+  const handleRevealPayout = async (withdrawal) => {
+    setRevealLoading(true);
+    setFeedback(null);
+    try {
+      const res = await walletService.revealWithdrawalPayoutAdmin(withdrawal._id);
+      if (res.success) {
+        setRevealedItem({
+          withdrawal,
+          data: res,
+        });
+        setFeedback({
+          type: 'success',
+          message: `Payout credentials decrypted & revealed for ${withdrawal.withdrawalReference}. Security event logged to AuditLog.`,
+        });
+      }
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        message: err.response?.data?.message || err.message || 'Failed to reveal credentials',
+      });
+    } finally {
+      setRevealLoading(false);
+    }
+  };
+
+  const copyToClipboard = (text, label) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setFeedback({
+      type: 'success',
+      message: `Copied ${label} to clipboard: ${text}`,
+    });
+  };
+
+  // Submit manual status transition
+  const handleTransitionSubmit = async (e) => {
+    e.preventDefault();
+    if (!transitioningItem || !targetStatusChoice) return;
+
+    if (targetStatusChoice === 'REJECTED') {
+      setRejectingItem(transitioningItem);
+      setRejectionReason(transitionNotes || 'Rejected by Administrator');
+      setTransitioningItem(null);
+      return;
+    }
+
+    setActionLoading(true);
+    setFeedback(null);
+    try {
+      const res = await walletService.updateWithdrawalStatusAdmin(transitioningItem._id, {
+        status: targetStatusChoice,
+        adminNotes: transitionNotes || `Status updated to ${targetStatusChoice} by Admin`,
+      });
+      if (res.success) {
+        setFeedback({
+          type: 'success',
+          message: `Withdrawal ${transitioningItem.withdrawalReference} updated to ${targetStatusChoice}.`,
+        });
+        setTransitioningItem(null);
+        setTargetStatusChoice('');
+        setTransitionNotes('');
+        await fetchWithdrawals();
+      }
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        message: err.response?.data?.message || err.message || 'Failed to update withdrawal status',
+      });
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -439,15 +525,15 @@ export function AdminWithdrawalsPage() {
             <table className="w-full text-left text-xs">
               <thead className="bg-white/[0.04] text-gray-400 uppercase font-semibold border-b border-white/5">
                 <tr>
-                  <th className="px-6 py-4">Reference</th>
-                  <th className="px-6 py-4">User</th>
-                  <th className="px-6 py-4">Amount</th>
-                  <th className="px-6 py-4">Payout Destination</th>
-                  <th className="px-6 py-4">Status</th>
-                  <th className="px-6 py-4">
+                  <th className="px-5 py-4">Reference & ID</th>
+                  <th className="px-5 py-4">User</th>
+                  <th className="px-5 py-4">Amount</th>
+                  <th className="px-5 py-4">Payment Method & Destination</th>
+                  <th className="px-5 py-4">Status & History</th>
+                  <th className="px-5 py-4">
                     {statusFilter === 'QUARANTINED' ? 'Quarantined At' : 'Requested At'}
                   </th>
-                  <th className="px-6 py-4 text-right">Actions</th>
+                  <th className="px-5 py-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -473,34 +559,82 @@ export function AdminWithdrawalsPage() {
                       Boolean(w.reconciliationReason);
 
                     const reasonText = w.reconciliationReason || w.metadata?.reconciliationReason;
+                    const userId = w.user?._id || (typeof w.user === 'string' ? w.user : 'N/A');
+                    const userName = w.user?.name || 'User';
+                    const userEmail = w.user?.email || 'N/A';
+                    const payoutMethod = (w.payoutMethod || 'UPI').toUpperCase();
+                    const holderName = w.payoutDetails?.accountHolderName;
+                    const bankName = w.payoutDetails?.bankName;
+                    const ifsc = w.payoutDetails?.ifscCode;
+                    const maskedId = w.maskedIdentifier || w.payoutDetails?.maskedIdentifier || '******';
 
                     return (
                       <tr key={w._id} className="hover:bg-white/[0.02] transition-colors">
-                        <td className="px-6 py-4 font-mono font-bold text-purple-300">
-                          {w.withdrawalReference}
+                        <td className="px-5 py-4">
+                          <div className="font-mono font-bold text-purple-300">
+                            {w.withdrawalReference}
+                          </div>
+                          <div className="font-mono text-[10px] text-gray-500 truncate max-w-[130px]" title={`User ID: ${userId}`}>
+                            UID: {userId}
+                          </div>
                         </td>
-                        <td className="px-6 py-4">
+                        <td className="px-5 py-4">
                           <div className="font-semibold text-white">
-                            {w.user?.name || 'User'}
+                            {userName}
                           </div>
-                          <div className="text-[11px] text-gray-400">
-                            {w.user?.email || 'N/A'}
+                          <div className="text-[11px] text-gray-400 truncate max-w-[140px]" title={userEmail}>
+                            {userEmail}
                           </div>
                         </td>
-                        <td className="px-6 py-4 font-bold text-emerald-400 text-sm">
+                        <td className="px-5 py-4 font-bold text-emerald-400 text-sm whitespace-nowrap">
                           {formatINR(w.amount)}
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="uppercase font-semibold text-gray-300">
-                            {w.payoutMethod || 'UPI'}
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-purple-950/60 text-purple-300 border border-purple-800/40">
+                              {payoutMethod}
+                            </span>
+                            {holderName && (
+                              <span className="text-[11px] font-medium text-gray-300 truncate max-w-[120px]" title={holderName}>
+                                {holderName}
+                              </span>
+                            )}
                           </div>
-                          {/* Masked destination: never exposes raw account or secrets */}
-                          <div className="font-mono text-[11px] text-gray-400">
-                            {w.maskedIdentifier || w.payoutDetails?.maskedIdentifier || '******'}
+                          <div className="font-mono text-[11px] text-gray-300">
+                            {maskedId}
+                          </div>
+                          {bankName && (
+                            <div className="text-[10px] text-gray-400">
+                              {bankName} {ifsc ? `• IFSC: ${ifsc}` : ''}
+                            </div>
+                          )}
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleRevealPayout(w)}
+                              disabled={revealLoading}
+                              className="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1 transition-colors disabled:opacity-50"
+                              title="Unmask and reveal sensitive payout credentials (logged to audit trail)"
+                            >
+                              <span>👁</span>
+                              <span>Reveal Payout Details</span>
+                            </button>
                           </div>
                         </td>
-                        <td className="px-6 py-4">
-                          <StatusBadge status={w.status} isQuarantined={isQuarantinedRow} />
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-1.5">
+                            <StatusBadge status={w.status} isQuarantined={isQuarantinedRow} />
+                            {w.statusHistory && w.statusHistory.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setHistoryItem(w)}
+                                className="px-1.5 py-0.5 rounded text-[10px] text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+                                title="View status change history"
+                              >
+                                History ({w.statusHistory.length})
+                              </button>
+                            )}
+                          </div>
                           {isQuarantinedRow && reasonText && (
                             <div
                               className="mt-1.5 p-2 rounded-lg bg-amber-950/60 border border-amber-800/60 text-[10px] text-amber-200 max-w-xs break-words"
@@ -518,15 +652,15 @@ export function AdminWithdrawalsPage() {
                             </div>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-gray-400">
+                        <td className="px-5 py-4 text-gray-400 whitespace-nowrap">
                           {formatDate(w.quarantinedAt || w.createdAt)}
                         </td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
+                        <td className="px-5 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
                             <button
                               type="button"
                               onClick={() => handleInspect(w._id)}
-                              className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-[11px] font-semibold"
+                              className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-[11px] font-semibold"
                             >
                               Audit
                             </button>
@@ -551,7 +685,8 @@ export function AdminWithdrawalsPage() {
                                       type="button"
                                       disabled={actionLoading}
                                       onClick={() => handleApprove(w._id)}
-                                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold"
+                                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold"
+                                      title="Approve request"
                                     >
                                       Approve
                                     </button>
@@ -562,7 +697,8 @@ export function AdminWithdrawalsPage() {
                                         setRejectingItem(w);
                                         setRejectionReason('');
                                       }}
-                                      className="px-2.5 py-1 rounded-lg bg-rose-600/80 hover:bg-rose-600 text-white text-[11px] font-bold"
+                                      className="px-2 py-1 rounded-lg bg-rose-600/80 hover:bg-rose-600 text-white text-[11px] font-bold"
+                                      title="Reject and immediately refund to user"
                                     >
                                       Reject
                                     </button>
@@ -576,7 +712,8 @@ export function AdminWithdrawalsPage() {
                                       type="button"
                                       disabled={actionLoading}
                                       onClick={() => handleUpdateStatus(w._id, 'PROCESSING')}
-                                      className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-bold"
+                                      className="px-2 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-bold"
+                                      title="Move to processing"
                                     >
                                       Process
                                     </button>
@@ -587,7 +724,8 @@ export function AdminWithdrawalsPage() {
                                         setRejectingItem(w);
                                         setRejectionReason('');
                                       }}
-                                      className="px-2.5 py-1 rounded-lg bg-rose-600/80 hover:bg-rose-600 text-white text-[11px] font-bold"
+                                      className="px-2 py-1 rounded-lg bg-rose-600/80 hover:bg-rose-600 text-white text-[11px] font-bold"
+                                      title="Reject and immediately refund to user"
                                     >
                                       Reject
                                     </button>
@@ -601,20 +739,37 @@ export function AdminWithdrawalsPage() {
                                       type="button"
                                       disabled={actionLoading}
                                       onClick={() => handleUpdateStatus(w._id, 'COMPLETED')}
-                                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold"
+                                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold"
+                                      title="Mark Paid (Record payout completion)"
                                     >
-                                      Mark Paid (Test)
+                                      Mark Paid
                                     </button>
                                     <button
                                       type="button"
                                       disabled={actionLoading}
                                       onClick={() => handleUpdateStatus(w._id, 'FAILED')}
-                                      className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold"
+                                      className="px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold"
+                                      title="Mark Fail & Refund balance to user"
                                     >
-                                      Mark Fail & Refund
+                                      Fail & Refund
                                     </button>
                                   </>
                                 )}
+
+                                {/* Generic status transition launcher for any status */}
+                                <button
+                                  type="button"
+                                  disabled={actionLoading}
+                                  onClick={() => {
+                                    setTransitioningItem(w);
+                                    setTargetStatusChoice(w.status);
+                                    setTransitionNotes('');
+                                  }}
+                                  className="px-1.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white text-[10px]"
+                                  title="Change status manually"
+                                >
+                                  ✎ Status
+                                </button>
                               </>
                             )}
                           </div>
@@ -1087,6 +1242,275 @@ export function AdminWithdrawalsPage() {
                   </div>
                 </div>
               )}
+            </Card>
+          </div>
+        )}
+
+        {/* REVEALED CREDENTIALS MODAL */}
+        {revealedItem && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <Card className="max-w-lg w-full p-6 border-purple-600/80 bg-[#0d091a] shadow-2xl">
+              <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                <div className="flex items-center gap-2">
+                  <span className="p-2 rounded-xl bg-purple-500/20 text-purple-300 text-lg">👁</span>
+                  <div>
+                    <h4 className="text-base font-bold text-white">Revealed Payout Credentials</h4>
+                    <p className="text-xs text-purple-300">Decrypted via AES-256-GCM (Security Event Logged)</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRevealedItem(null)}
+                  className="text-gray-400 hover:text-white text-2xl font-bold"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="mt-4 p-3 rounded-xl bg-amber-950/40 border border-amber-600/50 text-[11px] text-amber-200">
+                <span className="font-bold text-amber-300">⚠ Financial Security Notice:</span> Credentials were decrypted for operational fulfillment. This reveal event has been recorded in the immutable AuditLog.
+              </div>
+
+              <div className="mt-4 space-y-3 text-xs">
+                <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 space-y-2">
+                  <div className="flex justify-between items-center text-gray-400">
+                    <span>Reference:</span>
+                    <span className="font-mono font-bold text-purple-300">{revealedItem.withdrawal.withdrawalReference}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-400">
+                    <span>Amount:</span>
+                    <span className="font-bold text-emerald-400 text-sm">{formatINR(revealedItem.withdrawal.amount)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-400">
+                    <span>Method:</span>
+                    <span className="font-bold text-white uppercase">{revealedItem.data.payoutMethod || 'UPI'}</span>
+                  </div>
+                  {revealedItem.data.accountHolderName && (
+                    <div className="flex justify-between items-center text-gray-400">
+                      <span>Account Holder:</span>
+                      <span className="font-semibold text-white">{revealedItem.data.accountHolderName}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Decrypted UPI ID */}
+                {revealedItem.data.upiId && (
+                  <div className="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/40">
+                    <div className="text-gray-400 text-[11px] uppercase tracking-wider mb-1">Decrypted UPI ID (VPA)</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-sm font-bold text-purple-200 select-all">{revealedItem.data.upiId}</span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(revealedItem.data.upiId, 'UPI ID')}
+                        className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-bold"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Decrypted Bank Transfer Details */}
+                {revealedItem.data.accountNumber && (
+                  <div className="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/40 space-y-3">
+                    <div>
+                      <div className="text-gray-400 text-[11px] uppercase tracking-wider mb-1">Bank Name</div>
+                      <div className="font-semibold text-white">{revealedItem.data.bankName || 'N/A'}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400 text-[11px] uppercase tracking-wider mb-1">Bank Account Number</div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-sm font-bold text-purple-200 select-all">{revealedItem.data.accountNumber}</span>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(revealedItem.data.accountNumber, 'Account Number')}
+                          className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-bold"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400 text-[11px] uppercase tracking-wider mb-1">IFSC Code</div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-sm font-bold text-purple-200 select-all">{revealedItem.data.ifscCode}</span>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(revealedItem.data.ifscCode, 'IFSC Code')}
+                          className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-bold"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 flex justify-end">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setRevealedItem(null)}
+                    className="text-xs"
+                  >
+                    Close Window
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* STATUS HISTORY MODAL */}
+        {historyItem && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <Card className="max-w-lg w-full p-6 border-purple-800/80 bg-[#0d091a] shadow-2xl max-h-[80vh] overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
+                <div>
+                  <h4 className="text-base font-bold text-white">Withdrawal Status Lifecycle</h4>
+                  <p className="text-xs text-purple-300 font-mono">{historyItem.withdrawalReference}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHistoryItem(null)}
+                  className="text-gray-400 hover:text-white text-2xl font-bold"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                {/* Origin */}
+                <div className="p-3 rounded-xl bg-white/[0.02] border border-white/10 flex items-start gap-3">
+                  <span className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 shrink-0" />
+                  <div>
+                    <div className="font-bold text-white">Request Created (PENDING)</div>
+                    <div className="text-[11px] text-gray-400">{formatDate(historyItem.createdAt)}</div>
+                    <div className="text-[11px] text-gray-300 mt-1">Submitted by user with reserved balance of {formatINR(historyItem.amount)}.</div>
+                  </div>
+                </div>
+
+                {/* History Steps */}
+                {historyItem.statusHistory && historyItem.statusHistory.length > 0 ? (
+                  historyItem.statusHistory.map((step, idx) => (
+                    <div key={idx} className="p-3 rounded-xl bg-white/[0.04] border border-white/10 flex items-start gap-3">
+                      <span className="w-2 h-2 rounded-full bg-purple-400 mt-1.5 shrink-0" />
+                      <div>
+                        <div className="font-bold text-white flex items-center gap-2">
+                          <span>Status: {step.status}</span>
+                          <span className="text-[10px] text-purple-300">Step {idx + 1}</span>
+                        </div>
+                        <div className="text-[11px] text-gray-400">
+                          {formatDate(step.changedAt)} {step.changedBy ? `• Admin: ${step.changedBy}` : ''}
+                        </div>
+                        {step.notes && (
+                          <div className="text-[11px] text-gray-300 mt-1 italic">
+                            "{step.notes}"
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-gray-500 py-3 text-center">No secondary status transitions recorded.</div>
+                )}
+
+                <div className="pt-2 flex justify-end">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setHistoryItem(null)}
+                    className="text-xs"
+                  >
+                    Close History
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* MANUAL STATUS TRANSITION MODAL */}
+        {transitioningItem && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <Card className="max-w-md w-full p-6 border-purple-800/80 bg-[#0d091a] shadow-2xl">
+              <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
+                <div>
+                  <h4 className="text-base font-bold text-white">Update Withdrawal Status</h4>
+                  <p className="text-xs text-purple-300 font-mono">{transitioningItem.withdrawalReference}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTransitioningItem(null);
+                    setTargetStatusChoice('');
+                    setTransitionNotes('');
+                  }}
+                  className="text-gray-400 hover:text-white text-2xl font-bold"
+                >
+                  ×
+                </button>
+              </div>
+
+              <form onSubmit={handleTransitionSubmit} className="space-y-4 text-xs">
+                <div>
+                  <label className="block text-gray-300 font-semibold mb-1">Target Status</label>
+                  <select
+                    value={targetStatusChoice}
+                    onChange={(e) => setTargetStatusChoice(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-black/60 border border-white/10 text-white text-xs focus:outline-none focus:border-purple-500"
+                  >
+                    <option value="PENDING">PENDING (Awaiting Review)</option>
+                    <option value="APPROVED">APPROVED (Authorized for Processing)</option>
+                    <option value="PROCESSING">PROCESSING (Executing Outward Payment)</option>
+                    <option value="COMPLETED">COMPLETED (Paid Externally)</option>
+                    <option value="QUARANTINED">QUARANTINED (Hold for Financial Audit)</option>
+                    <option value="REJECTED">REJECTED (Refund Balance to User)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-gray-300 font-semibold mb-1">Admin Notes / Audit Justification</label>
+                  <textarea
+                    rows={3}
+                    value={transitionNotes}
+                    onChange={(e) => setTransitionNotes(e.target.value)}
+                    placeholder="Enter operational notes or reference number..."
+                    className="w-full px-3 py-2 rounded-xl bg-black/60 border border-white/10 text-white text-xs focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                {targetStatusChoice === 'REJECTED' && (
+                  <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-600/50 text-[11px] text-rose-200">
+                    ⚠ Selecting <strong>REJECTED</strong> will immediately unlock and refund <strong>{formatINR(transitioningItem.amount)}</strong> back to the user's available wallet balance.
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 pt-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    onClick={() => {
+                      setTransitioningItem(null);
+                      setTargetStatusChoice('');
+                      setTransitionNotes('');
+                    }}
+                    className="flex-1 text-xs"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    type="submit"
+                    disabled={actionLoading || !targetStatusChoice}
+                    className="flex-1 text-xs font-bold"
+                  >
+                    {actionLoading ? 'Updating...' : 'Confirm Update'}
+                  </Button>
+                </div>
+              </form>
             </Card>
           </div>
         )}

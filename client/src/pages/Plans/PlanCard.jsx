@@ -1,4 +1,5 @@
 import { Button, Card } from '../../components/common';
+import { calculatePlanMetrics, PLAN_RISK_DISCLOSURE } from '../../utils/planCalculations';
 
 export function PlanCard({
   plan,
@@ -6,8 +7,10 @@ export function PlanCard({
   onPurchase,
   onViewDetails,
 }) {
+  const metrics = calculatePlanMetrics(plan.price, plan.durationDays || 30);
   const priceFormatted = Number(plan.price).toLocaleString('en-IN');
-  const dailyRoiPercent = plan.dailyRoiRate ? (plan.dailyRoiRate * 100).toFixed(2) : null;
+  const dailyAmountFormatted = Number(metrics.dailyAmount).toLocaleString('en-IN');
+  const totalReturnFormatted = Number(metrics.illustrativeTotal).toLocaleString('en-IN');
 
   return (
     <Card
@@ -42,7 +45,7 @@ export function PlanCard({
         </h3>
 
         <p className="text-sm text-gray-400 mt-2 line-clamp-2 min-h-[40px] leading-relaxed">
-          {plan.description || 'Enterprise cloud mining cluster with dedicated hash capacity and automatic yields.'}
+          {plan.description || 'Enterprise cloud compute cluster for essential hashrate and transparent daily yields.'}
         </p>
 
         {/* Price & Duration */}
@@ -52,22 +55,28 @@ export function PlanCard({
               ₹{priceFormatted}
             </span>
             <span className="text-xs text-gray-400 ml-2 font-medium">
-              INR / {plan.durationDays} Days
+              INR / {metrics.durationDays} Days
             </span>
           </div>
 
-          {dailyRoiPercent && (
-            <div className="text-right">
-              <span className="text-xs font-semibold text-emerald-400 block">
-                +{dailyRoiPercent}% / day
-              </span>
-              <span className="text-[10px] text-gray-400">Est. Daily Yield</span>
-            </div>
-          )}
+          <div className="text-right">
+            <span className="text-xs font-bold text-emerald-400 block">
+              +{metrics.dailyPercentage}% / day
+            </span>
+            <span className="text-[11px] font-semibold text-purple-300">
+              ₹{dailyAmountFormatted} / day
+            </span>
+          </div>
+        </div>
+
+        {/* Illustrative Return Summary Box */}
+        <div className="mt-4 p-3 rounded-xl bg-purple-950/30 border border-purple-800/30 flex items-center justify-between text-xs">
+          <span className="text-gray-400">Illustrative 30-Day Return:</span>
+          <span className="font-bold text-emerald-400">₹{totalReturnFormatted}</span>
         </div>
 
         {/* Feature List */}
-        <div className="mt-6 space-y-2.5 pb-6">
+        <div className="mt-6 space-y-2.5 pb-4">
           <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">
             Plan Capabilities
           </p>
@@ -104,7 +113,7 @@ export function PlanCard({
         </div>
       </div>
 
-      {/* Card Actions */}
+      {/* Card Actions & Legal Risk Disclosure */}
       <div className="pt-4 border-t border-white/10 flex flex-col gap-2.5 mt-auto">
         {isAuthenticated ? (
           <Button
@@ -139,6 +148,10 @@ export function PlanCard({
         >
           View Full Specifications →
         </Button>
+
+        <p className="text-[10px] text-gray-500 text-center leading-tight px-1 pt-1">
+          {PLAN_RISK_DISCLOSURE}
+        </p>
       </div>
     </Card>
   );

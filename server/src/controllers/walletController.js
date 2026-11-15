@@ -17,6 +17,7 @@ import {
   approveWithdrawalAdmin,
   rejectWithdrawalAdmin,
   updateWithdrawalStatusAdmin,
+  revealWithdrawalPayoutAdmin,
 } from '../services/walletService.js';
 
 /**
@@ -465,6 +466,29 @@ export const resolveQuarantinedWithdrawalAdminController = async (req, res, next
   }
 };
 
+/**
+ * Admin: Securely reveal decrypted payout details for authorized administrators
+ * @route POST /api/v1/wallet/admin/withdrawals/:id/reveal
+ */
+export const revealWithdrawalPayoutAdminController = async (req, res, next) => {
+  try {
+    const adminId = req.user._id;
+    const { id } = req.params;
+    const ipAddress = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || '';
+
+    const result = await revealWithdrawalPayoutAdmin(adminId, id, ipAddress);
+    return res.status(200).json(result);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    next(error);
+  }
+};
+
 export default {
   getWallet,
   getTransactions,
@@ -483,4 +507,5 @@ export default {
   approveWithdrawalAdminController,
   rejectWithdrawalAdminController,
   updateWithdrawalStatusAdminController,
+  revealWithdrawalPayoutAdminController,
 };
