@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { planService } from '../../services';
 import { Button } from '../../components/common';
+import { calculatePlanMetrics, PLAN_RISK_DISCLOSURE } from '../../utils/planCalculations';
 
 export function PlanDetailsModal({
   planId,
@@ -125,40 +126,55 @@ export function PlanDetailsModal({
             </p>
 
             {/* Metrics Breakdown Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-xl bg-white/[0.03] border border-white/10 mb-6">
-              <div>
-                <span className="text-[10px] uppercase font-semibold text-gray-400 block">
-                  Price
-                </span>
-                <span className="text-lg font-bold text-white">
-                  ₹{Number(plan.price).toLocaleString('en-IN')}
-                </span>
-              </div>
-              <div>
-                <span className="text-[10px] uppercase font-semibold text-gray-400 block">
-                  Contract Duration
-                </span>
-                <span className="text-lg font-bold text-white">
-                  {plan.durationDays} Days
-                </span>
-              </div>
-              <div>
-                <span className="text-[10px] uppercase font-semibold text-gray-400 block">
-                  Daily Yield Rate
-                </span>
-                <span className="text-lg font-bold text-emerald-400">
-                  {plan.dailyRoiRate ? `+${(plan.dailyRoiRate * 100).toFixed(2)}%` : 'Variable'}
-                </span>
-              </div>
-              <div>
-                <span className="text-[10px] uppercase font-semibold text-gray-400 block">
-                  Hardware Class
-                </span>
-                <span className="text-lg font-bold text-purple-300">
-                  Enterprise ASIC
-                </span>
-              </div>
-            </div>
+            {(() => {
+              const metrics = calculatePlanMetrics(plan.price, plan.durationDays || 30);
+              return (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-xl bg-white/[0.03] border border-white/10 mb-4">
+                    <div>
+                      <span className="text-[10px] uppercase font-semibold text-gray-400 block">
+                        Investment Amount
+                      </span>
+                      <span className="text-lg font-bold text-white">
+                        ₹{Number(plan.price).toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-semibold text-gray-400 block">
+                        Contract Duration
+                      </span>
+                      <span className="text-lg font-bold text-white">
+                        {metrics.durationDays} Days
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-semibold text-gray-400 block">
+                        Illustrative Daily Yield
+                      </span>
+                      <span className="text-lg font-bold text-emerald-400">
+                        +{metrics.dailyPercentage}%
+                      </span>
+                      <span className="text-[10px] text-gray-400 block">
+                        ₹{Number(metrics.dailyAmount).toLocaleString('en-IN')}/day
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-semibold text-gray-400 block">
+                        Illustrative 30-Day Total
+                      </span>
+                      <span className="text-lg font-bold text-purple-300">
+                        ₹{Number(metrics.illustrativeTotal).toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mb-6 p-3 rounded-xl bg-purple-950/20 border border-purple-800/30 text-[11px] text-gray-400">
+                    <span className="font-semibold text-purple-300">Disclaimer: </span>
+                    {PLAN_RISK_DISCLOSURE}
+                  </div>
+                </>
+              );
+            })()}
 
             {/* Full Features Specification */}
             <div className="mb-6">

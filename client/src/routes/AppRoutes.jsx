@@ -7,7 +7,7 @@ import { DashboardPage } from '../pages/Dashboard';
 import { AboutPage } from '../pages/About';
 import { ContactPage } from '../pages/Contact';
 import { NotFoundPage } from '../pages/NotFound';
-import { AdminPlansPage, AdminWithdrawalsPage } from '../pages/Admin';
+import { AdminDashboardPage } from '../pages/Admin';
 import { WalletPage } from '../pages/Wallet';
 import { ReferralsPage } from '../pages/Referrals';
 import { ProtectedRoute } from '../components/auth';
@@ -65,10 +65,18 @@ export function AppRoutes() {
           }
         />
         <Route
+          path={ROUTES.ADMIN}
+          element={
+            <ProtectedRoute requireAdmin={true}>
+              <AdminDashboardPage initialTab="overview" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path={ROUTES.ADMIN_PLANS}
           element={
             <ProtectedRoute requireAdmin={true}>
-              <AdminPlansPage />
+              <AdminDashboardPage initialTab="plans" />
             </ProtectedRoute>
           }
         />
@@ -76,7 +84,7 @@ export function AppRoutes() {
           path={ROUTES.ADMIN_WITHDRAWALS}
           element={
             <ProtectedRoute requireAdmin={true}>
-              <AdminWithdrawalsPage />
+              <AdminDashboardPage initialTab="withdrawals" />
             </ProtectedRoute>
           }
         />

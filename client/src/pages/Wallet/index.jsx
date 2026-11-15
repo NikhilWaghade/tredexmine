@@ -63,6 +63,17 @@ export function WalletPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [historySubTab, setHistorySubTab] = useState('withdrawals'); // 'deposits' | 'withdrawals' | 'transactions'
 
+  // Is local development simulation enabled via environment
+  const isDevSimulationAvailable =
+    Boolean(import.meta.env.DEV) &&
+    import.meta.env.VITE_ENABLE_TEST_PAYMENT_SIMULATION !== 'false';
+
+  // Gateway config state
+  const [gatewayConfig, setGatewayConfig] = useState({
+    isConfigured: false,
+    keyId: '',
+  });
+
   // Loading & error states
   const [loading, setLoading] = useState(true);
   const [walletData, setWalletData] = useState(null);
@@ -71,15 +82,22 @@ export function WalletPage() {
   const [transactions, setTransactions] = useState([]);
   const [feedback, setFeedback] = useState(null); // { type: 'success' | 'error', message: '' }
 
-  // Deposit form state
+  // Deposit form state - In production, defaults strictly to razorpay gateway
   const [depositAmount, setDepositAmount] = useState('1000');
-  const [depositProvider, setDepositProvider] = useState('mock'); // 'mock' | 'razorpay'
+  const [depositProvider, setDepositProvider] = useState(
+    isDevSimulationAvailable ? 'mock' : 'razorpay'
+  );
   const [depositSubmitting, setDepositSubmitting] = useState(false);
 
-  // Withdrawal form state
+  // Withdrawal form state (supports both UPI and Full Bank Transfer)
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [payoutMethod, setPayoutMethod] = useState('upi'); // 'upi' | 'bank_transfer'
-  const [payoutIdentifier, setPayoutIdentifier] = useState('');
+  const [upiId, setUpiId] = useState('');
+  const [bankAccountHolder, setBankAccountHolder] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [confirmAccountNumber, setConfirmAccountNumber] = useState('');
+  const [ifscCode, setIfscCode] = useState('');
   const [accountHolderName, setAccountHolderName] = useState('');
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
   const [confirmWithdrawModal, setConfirmWithdrawModal] = useState(false);
@@ -87,15 +105,16 @@ export function WalletPage() {
   // Cancellation state
   const [cancellingId, setCancellingId] = useState(null);
 
-  // Fetch full wallet overview and histories
+  // Fetch full wallet overview, gateway status, and histories
   const loadWalletDetails = useCallback(async () => {
     setLoading(true);
     try {
-      const [walletRes, depRes, withRes, txRes] = await Promise.allSettled([
+      const [walletRes, depRes, withRes, txRes, configRes] = await Promise.allSettled([
         walletService.getWallet(),
         walletService.getDeposits({ limit: 20 }),
         walletService.getWithdrawals({ limit: 20 }),
         walletService.getTransactions({ limit: 20 }),
+        paymentService.getPaymentConfig(),
       ]);
 
       if (walletRes.status === 'fulfilled' && walletRes.value?.success) {
@@ -114,6 +133,14 @@ export function WalletPage() {
 
       if (txRes.status === 'fulfilled' && txRes.value?.success) {
         setTransactions(txRes.value.transactions || []);
+      }
+
+      if (configRes.status === 'fulfilled') {
+        const cfg = configRes.value?.data || configRes.value || {};
+        setGatewayConfig({
+          isConfigured: Boolean(cfg.isConfigured),
+          keyId: cfg.keyId || '',
+        });
       }
     } catch (err) {
       console.error('[WalletPage] Error loading wallet details:', err);
@@ -189,7 +216,7 @@ export function WalletPage() {
         const keyId = intentData.keyId;
         if (!keyId || keyId.includes('placeholder')) {
           throw new Error(
-            'Razorpay test mode gateway is not configured on the server. Please configure RAZORPAY_KEY_ID or use Dev Simulation mode.'
+            'Online payment gateway is currently unavailable for processing deposits. Please contact support or try again later.'
           );
         }
 
@@ -297,12 +324,64 @@ export function WalletPage() {
       return;
     }
 
-    if (!payoutIdentifier.trim()) {
-      setFeedback({
-        type: 'error',
-        message: payoutMethod === 'upi' ? 'Please provide a valid UPI ID' : 'Please provide bank account number',
-      });
-      return;
+    let payoutDetails;
+    if (payoutMethod === 'upi') {
+      const upi = upiId.trim();
+      if (!upi || !upi.includes('@')) {
+        setFeedback({
+          type: 'error',
+          message: 'Please provide a valid registered UPI ID (e.g. mobile@upi or name@okaxis)',
+        });
+        return;
+      }
+      payoutDetails = {
+        upiId: upi,
+        identifier: upi,
+        accountHolderName: accountHolderName.trim() || user?.name || '',
+      };
+    } else {
+      if (!bankAccountHolder.trim()) {
+        setFeedback({
+          type: 'error',
+          message: 'Please provide the Account Holder Name as registered in the bank',
+        });
+        return;
+      }
+      if (!bankName.trim()) {
+        setFeedback({
+          type: 'error',
+          message: 'Please provide the Bank Name (e.g. State Bank of India)',
+        });
+        return;
+      }
+      if (!accountNumber.trim() || accountNumber.trim().length < 8) {
+        setFeedback({
+          type: 'error',
+          message: 'Please provide a valid Account Number (minimum 8 digits)',
+        });
+        return;
+      }
+      if (accountNumber.trim() !== confirmAccountNumber.trim()) {
+        setFeedback({
+          type: 'error',
+          message: 'Account Number and Confirmation Account Number do not match',
+        });
+        return;
+      }
+      if (!ifscCode.trim() || ifscCode.trim().length !== 11) {
+        setFeedback({
+          type: 'error',
+          message: 'Please provide a valid 11-character IFSC Code (e.g. SBIN0001234)',
+        });
+        return;
+      }
+      payoutDetails = {
+        accountHolderName: bankAccountHolder.trim(),
+        bankName: bankName.trim(),
+        accountNumber: accountNumber.trim(),
+        ifscCode: ifscCode.trim().toUpperCase(),
+        identifier: accountNumber.trim(),
+      };
     }
 
     setWithdrawSubmitting(true);
@@ -315,10 +394,7 @@ export function WalletPage() {
         amount: amountNum,
         idempotencyKey,
         payoutMethod,
-        payoutDetails: {
-          identifier: payoutIdentifier.trim(),
-          accountHolderName: accountHolderName.trim() || user?.name || '',
-        },
+        payoutDetails,
       });
 
       if (res.success) {
@@ -327,7 +403,12 @@ export function WalletPage() {
           message: `Withdrawal request for ${formatINR(amountNum)} submitted successfully! Funds reserved. Reference: ${res.withdrawal.withdrawalReference}`,
         });
         setWithdrawAmount('');
-        setPayoutIdentifier('');
+        setUpiId('');
+        setBankAccountHolder('');
+        setBankName('');
+        setAccountNumber('');
+        setConfirmAccountNumber('');
+        setIfscCode('');
         await refreshWallet();
         await loadWalletDetails();
         setActiveTab('history');
@@ -665,14 +746,27 @@ export function WalletPage() {
                 Funds are added securely and credited immediately to your authoritative balance upon server verification.
               </p>
 
-              {/* Dev Simulation Banner */}
-              <div className="p-3.5 rounded-xl bg-purple-950/50 border border-purple-700/60 text-purple-200 text-xs mb-6 flex items-center gap-3">
-                <span className="text-lg">⚡</span>
-                <div>
-                  <span className="font-bold text-white">Mock Test Deposit Mode Active: </span>
-                  Simulates a verified payment callback with a cryptographic server signature. No real bank charge.
+              {/* Dev Simulation Banner - Local Development Only */}
+              {isDevSimulationAvailable && (
+                <div className="p-3.5 rounded-xl bg-purple-950/50 border border-purple-700/60 text-purple-200 text-xs mb-6 flex items-center gap-3">
+                  <span className="text-lg">⚡</span>
+                  <div>
+                    <span className="font-bold text-white">[Dev Simulation Mode]: </span>
+                    Simulates a verified test deposit callback with cryptographic signature. (Visible only in local development).
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* In Production: Show Payment Gateway status banner when unconfigured */}
+              {!isDevSimulationAvailable && !gatewayConfig.isConfigured && (
+                <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-600/50 text-amber-300 text-xs mb-6 flex items-center gap-3">
+                  <span className="text-xl">⚠</span>
+                  <div>
+                    <span className="font-bold text-white">Payment Gateway Offline: </span>
+                    Online deposit gateway is currently undergoing scheduled configuration. Please contact support or try again later.
+                  </div>
+                </div>
+              )}
 
               <form onSubmit={handleDepositSubmit} className="space-y-6">
                 {/* Quick Amount Chips */}
@@ -723,66 +817,80 @@ export function WalletPage() {
                   </p>
                 </div>
 
-                {/* Provider Selection */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
-                    Provider
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <label
-                      className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
-                        depositProvider === 'mock'
-                          ? 'bg-[#7A56D6]/20 border-[#7A56D6] text-white shadow-sm shadow-[#7A56D6]/20'
-                          : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name="depositProvider"
-                          value="mock"
-                          checked={depositProvider === 'mock'}
-                          onChange={() => setDepositProvider('mock')}
-                          className="accent-[#7A56D6]"
-                        />
-                        <span className="text-xs font-bold">Dev Simulation</span>
-                      </div>
-                      <span className="text-[10px] bg-purple-900/60 text-purple-300 px-2 py-0.5 rounded-full">
-                        Recommended
-                      </span>
+                {/* Provider Selection - Only rendered in Dev Environment */}
+                {isDevSimulationAvailable ? (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
+                      Provider (Local Dev Only)
                     </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <label
+                        className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
+                          depositProvider === 'mock'
+                            ? 'bg-[#7A56D6]/20 border-[#7A56D6] text-white shadow-sm shadow-[#7A56D6]/20'
+                            : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="depositProvider"
+                            value="mock"
+                            checked={depositProvider === 'mock'}
+                            onChange={() => setDepositProvider('mock')}
+                            className="accent-[#7A56D6]"
+                          />
+                          <span className="text-xs font-bold">Dev Simulation</span>
+                        </div>
+                        <span className="text-[10px] bg-purple-900/60 text-purple-300 px-2 py-0.5 rounded-full">
+                          Test Only
+                        </span>
+                      </label>
 
-                    <label
-                      className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
-                        depositProvider === 'razorpay'
-                          ? 'bg-[#7A56D6]/20 border-[#7A56D6] text-white'
-                          : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name="depositProvider"
-                          value="razorpay"
-                          checked={depositProvider === 'razorpay'}
-                          onChange={() => setDepositProvider('razorpay')}
-                          className="accent-[#7A56D6]"
-                        />
-                        <span className="text-xs font-bold">Razorpay Gateway</span>
-                      </div>
-                      <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
-                        Protected
-                      </span>
-                    </label>
+                      <label
+                        className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
+                          depositProvider === 'razorpay'
+                            ? 'bg-[#7A56D6]/20 border-[#7A56D6] text-white'
+                            : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="depositProvider"
+                            value="razorpay"
+                            checked={depositProvider === 'razorpay'}
+                            onChange={() => setDepositProvider('razorpay')}
+                            className="accent-[#7A56D6]"
+                          />
+                          <span className="text-xs font-bold">Razorpay Gateway</span>
+                        </div>
+                        <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
+                          Test Gateway
+                        </span>
+                      </label>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${gatewayConfig.isConfigured ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+                      <span className="font-semibold text-white">
+                        Payment Provider: Razorpay Secure Gateway
+                      </span>
+                    </div>
+                    <span className="text-[10px] bg-purple-950/80 text-purple-300 border border-purple-800/60 px-2 py-0.5 rounded-full font-bold">
+                      {gatewayConfig.isConfigured ? 'Online' : 'Offline'}
+                    </span>
+                  </div>
+                )}
 
                 {/* Submit Action */}
                 <Button
                   type="submit"
                   variant="primary"
                   size="lg"
-                  disabled={depositSubmitting}
+                  disabled={depositSubmitting || (!isDevSimulationAvailable && !gatewayConfig.isConfigured)}
                   className="w-full text-base font-bold shadow-lg shadow-[#7A56D6]/30"
                 >
                   {depositSubmitting ? (
@@ -889,37 +997,118 @@ export function WalletPage() {
                   </div>
                 </div>
 
-                {/* Payout Identifier Input */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
-                    {payoutMethod === 'upi' ? 'UPI Virtual Address (VPA)' : 'Bank Account Number / Details'}
-                  </label>
-                  <input
-                    type="text"
-                    value={payoutIdentifier}
-                    onChange={(e) => setPayoutIdentifier(e.target.value)}
-                    placeholder={payoutMethod === 'upi' ? 'user@upi' : 'Account number or IFSC'}
-                    required
-                    className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors"
-                  />
-                  <p className="text-[11px] text-gray-400 mt-1.5">
-                    Only masked identifiers are stored in the database for privacy.
-                  </p>
-                </div>
+                {/* Payout Destination Fields */}
+                {payoutMethod === 'upi' ? (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
+                        Registered UPI ID / VPA <span className="text-purple-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={upiId}
+                        onChange={(e) => setUpiId(e.target.value)}
+                        placeholder="e.g. mobile@upi or name@okhdfcbank"
+                        required
+                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors font-mono"
+                      />
+                      <p className="text-[11px] text-gray-400 mt-1.5">
+                        Funds will be transferred directly to this UPI address.
+                      </p>
+                    </div>
 
-                {/* Optional Account Holder Name */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
-                    Account Holder Name (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={accountHolderName}
-                    onChange={(e) => setAccountHolderName(e.target.value)}
-                    placeholder={user?.name || 'Full Name'}
-                    className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors"
-                  />
-                </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
+                        Account Holder Name (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={accountHolderName}
+                        onChange={(e) => setAccountHolderName(e.target.value)}
+                        placeholder={user?.name || 'Full Name'}
+                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
+                        Account Holder Name <span className="text-purple-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={bankAccountHolder}
+                        onChange={(e) => setBankAccountHolder(e.target.value)}
+                        placeholder="Full name as printed on bank passbook / statement"
+                        required
+                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
+                        Bank Name <span className="text-purple-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={bankName}
+                        onChange={(e) => setBankName(e.target.value)}
+                        placeholder="e.g. State Bank of India, HDFC Bank, ICICI Bank"
+                        required
+                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
+                          Account Number <span className="text-purple-400">*</span>
+                        </label>
+                        <input
+                          type="password"
+                          value={accountNumber}
+                          onChange={(e) => setAccountNumber(e.target.value)}
+                          placeholder="Bank Account Number"
+                          required
+                          className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
+                          Re-enter Account Number <span className="text-purple-400">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={confirmAccountNumber}
+                          onChange={(e) => setConfirmAccountNumber(e.target.value)}
+                          placeholder="Confirm Account Number"
+                          required
+                          className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
+                        IFSC Code <span className="text-purple-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={ifscCode}
+                        onChange={(e) => setIfscCode(e.target.value.toUpperCase())}
+                        placeholder="e.g. SBIN0001234, HDFC0000128"
+                        required
+                        maxLength={11}
+                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors uppercase font-mono tracking-wider"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-gray-400">
+                  🔒 Payout credentials are encrypted at rest with AES-256-GCM.
+                </p>
 
                 <Button
                   type="submit"
@@ -952,13 +1141,38 @@ export function WalletPage() {
                       <span className="font-bold text-white">{formatINR(balance - Number(withdrawAmount))}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-400">Method:</span>
-                      <span className="font-bold text-purple-300 uppercase">{payoutMethod}</span>
+                      <span className="text-gray-400">Payout Method:</span>
+                      <span className="font-bold text-purple-300 uppercase">
+                        {payoutMethod === 'upi' ? 'UPI (VPA)' : 'Bank Transfer (IMPS/NEFT)'}
+                      </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Recipient Identifier:</span>
-                      <span className="font-mono text-gray-200">{payoutIdentifier}</span>
-                    </div>
+                    {payoutMethod === 'upi' ? (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Registered UPI ID:</span>
+                        <span className="font-mono text-gray-200">{upiId}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Account Holder:</span>
+                          <span className="text-gray-200">{bankAccountHolder}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Bank Name:</span>
+                          <span className="text-gray-200">{bankName}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Account Number:</span>
+                          <span className="font-mono text-gray-200">
+                            {'*'.repeat(Math.max(0, accountNumber.length - 4)) + accountNumber.slice(-4)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">IFSC Code:</span>
+                          <span className="font-mono text-purple-300 uppercase">{ifscCode}</span>
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -1135,9 +1349,9 @@ export function WalletPage() {
                             </td>
                             <td className="px-6 py-4 text-gray-300 uppercase font-semibold text-[11px]">
                               {d.provider}{' '}
-                              {d.isTest && (
+                              {isDevSimulationAvailable && d.isTest && (
                                 <span className="ml-1 text-[10px] text-purple-400 font-normal">
-                                  (Test Simulation)
+                                  (Dev Test)
                                 </span>
                               )}
                             </td>

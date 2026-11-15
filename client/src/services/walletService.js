@@ -183,6 +183,26 @@ export const resolveQuarantinedWithdrawalAdmin = async (withdrawalId, data) => {
   return response.data;
 };
 
+/**
+ * Admin: Reconcile deposit record with ledger
+ * @param {string} depositReference
+ * @returns {Promise<Object>}
+ */
+export const reconcileDepositAdmin = async (depositReference) => {
+  const response = await api.post(`/wallet/admin/deposits/${depositReference}/reconcile`);
+  return response.data;
+};
+
+/**
+ * Admin: Reveal sensitive payout details (audited action)
+ * @param {string} withdrawalId
+ * @returns {Promise<Object>}
+ */
+export const revealWithdrawalPayoutAdmin = async (withdrawalId) => {
+  const response = await api.post(`/wallet/admin/withdrawals/${withdrawalId}/reveal`);
+  return response.data;
+};
+
 export default {
   getWallet,
   getTransactions,
@@ -199,4 +219,6 @@ export default {
   approveWithdrawalAdmin,
   rejectWithdrawalAdmin,
   updateWithdrawalStatusAdmin,
+  revealWithdrawalPayoutAdmin,
+  reconcileDepositAdmin,
 };

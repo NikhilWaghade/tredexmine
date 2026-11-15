@@ -5,5 +5,6 @@ export * as authService from './authService';
 export * as paymentService from './paymentService';
 export * as dashboardService from './dashboardService';
 export * as referralService from './referralService';
+export * as adminService from './adminService';
 
 
