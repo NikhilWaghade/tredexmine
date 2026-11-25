@@ -40,6 +40,7 @@ const auditLogSchema = new mongoose.Schema(
         'QUARANTINE_RESOLVE_REJECT',
         'AUDIT_INSPECT',
         'WEBHOOK_QUARANTINE_RECONCILE',
+        'WITHDRAWAL_PAYOUT_REVEAL',
       ],
       index: true,
     },
@@ -62,6 +63,7 @@ const auditLogSchema = new mongoose.Schema(
         'APPLY_MISSING_CREDIT',
         'REJECT_REFUND',
         'RECONCILE_WEBHOOK',
+        'REVEAL_PAYOUT',
       ],
     },
     reason: {

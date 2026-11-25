@@ -5,7 +5,7 @@ import { dashboardService, planService, walletService } from '../../services';
 import { Container, Button, Card, SectionHeader } from '../../components/common';
 import { ROUTES } from '../../constants';
 
-// Pure date formatting helpers placed outside component
+// Pure date formatting helpers
 function formatDate(dateString) {
   if (!dateString) return 'N/A';
   try {
@@ -36,12 +36,22 @@ function formatDateTime(dateString) {
   }
 }
 
+function formatINR(val) {
+  const num = Number(val || 0);
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(num);
+}
+
 export function DashboardPage() {
   const { user, wallet: contextWallet, isAuthenticated, isLoading: isAuthLoading, openAuthModal, refreshWallet } = useAuth();
 
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [copiedCode, setCopiedCode] = useState(false);
 
   // Consolidated and resilient data fetch using existing authenticated APIs
   const reloadDashboard = useCallback(async () => {
@@ -55,7 +65,7 @@ export function DashboardPage() {
         dashboardService.getDashboard(),
         planService.getMyActivePlans(),
         walletService.getWallet(),
-        walletService.getTransactions({ limit: 10 }),
+        walletService.getTransactions({ limit: 15 }),
       ]);
 
       let consolidatedData = null;
@@ -74,19 +84,27 @@ export function DashboardPage() {
         activePlansList = rawPlans.map((p) => {
           const endMs = p.endDate ? new Date(p.endDate).getTime() : nowMs;
           const calcRemaining = Math.max(0, Math.ceil((endMs - nowMs) / (1000 * 60 * 60 * 24)));
+          const dailyRoi = Number(p.dailyRoiRate || 0.01);
+          const dailyEarning = p.price && dailyRoi ? Math.round(p.price * dailyRoi * 100) / 100 : 0;
           return {
             id: p._id || p.id,
             planId: p.plan,
             name: p.planName || p.name || 'Mining Plan',
-            price: p.price,
-            durationDays: p.durationDays,
-            dailyRoiRate: p.dailyRoiRate,
+            planName: p.planName || p.name || 'Mining Plan',
+            price: Number(p.price || 0),
+            purchaseAmount: Number(p.price || 0),
+            purchaseDate: p.createdAt || p.startDate,
+            durationDays: p.durationDays || 30,
+            totalDuration: `${p.durationDays || 30} Days`,
+            dailyRoiRate: dailyRoi,
+            dailyEarning,
             hashRate: p.hashRate || 'Standard',
             features: p.features || [],
             startDate: p.startDate,
             endDate: p.endDate,
             status: p.status || 'active',
             remainingDays: p.remainingDays ?? calcRemaining,
+            totalVerifiedEarning: 0,
           };
         });
       }
@@ -95,6 +113,8 @@ export function DashboardPage() {
       let walletData = consolidatedData?.wallet || {
         balance: contextWallet?.balance != null ? Number(contextWallet.balance) : 0,
         currency: 'INR',
+        planIncome: 0,
+        referralIncome: 0,
       };
       if (walletResult.status === 'fulfilled' && walletResult.value?.success && walletResult.value?.wallet) {
         walletData = {
@@ -127,6 +147,20 @@ export function DashboardPage() {
         message: 'Automated income distribution ledger is not configured. No verified earnings records exist.',
       };
 
+      // 5. Daily earnings history
+      const dailyEarningsList = consolidatedData?.dailyEarningsHistory || [];
+
+      // 6. Purchased plans
+      const purchasedPlansList = consolidatedData?.purchasedPlans || activePlansList;
+
+      // 7. Referral summary
+      const referralSummaryData = consolidatedData?.referralSummary || {
+        referralCode: user?.referralCode || consolidatedData?.user?.referralCode,
+        totalReferrals: 0,
+        rewardedReferrals: 0,
+        totalRewardsEarned: Number(walletData.referralIncome || 0),
+      };
+
       if (!consolidatedData && activePlansResult.status === 'rejected' && walletResult.status === 'rejected') {
         throw new Error('Failed to load dashboard data from server.');
       }
@@ -138,7 +172,10 @@ export function DashboardPage() {
           count: activePlansCount,
           plans: activePlansList,
         },
+        purchasedPlans: purchasedPlansList,
         earnings: earningsData,
+        dailyEarningsHistory: dailyEarningsList,
+        referralSummary: referralSummaryData,
         recentTransactions: transactionsList,
       });
       setError(null);
@@ -190,6 +227,15 @@ export function DashboardPage() {
     await Promise.allSettled([reloadDashboard(), refreshWallet()]);
   };
 
+  const handleCopyReferral = () => {
+    const code = dashboardData?.user?.referralCode || user?.referralCode;
+    if (code) {
+      navigator.clipboard.writeText(code);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    }
+  };
+
   // 1. Unauthorized State
   if (!isAuthLoading && !isAuthenticated) {
     return (
@@ -220,7 +266,7 @@ export function DashboardPage() {
       <div className="py-12 sm:py-20">
         <Container>
           <div className="space-y-8 animate-pulse">
-            <div className="h-12 w-64 bg-white/5 rounded-xl mb-4" />
+            <div className="h-28 bg-white/[0.03] border border-purple-900/20 rounded-2xl" />
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
               {[1, 2, 3, 4].map((i) => (
                 <div key={i} className="h-32 bg-white/[0.03] border border-purple-900/20 rounded-2xl p-6" />
@@ -256,33 +302,60 @@ export function DashboardPage() {
   }
 
   const {
+    user: profileUser = user,
     wallet = { balance: 0 },
     activePlans = { count: 0, plans: [] },
+    purchasedPlans = [],
     earnings = { today: 0, total: 0, isConfigured: false },
+    dailyEarningsHistory = [],
+    referralSummary = null,
     recentTransactions = [],
   } = dashboardData || {};
+
+  const displayedPlans = purchasedPlans.length > 0 ? purchasedPlans : activePlans.plans;
 
   return (
     <div className="py-10 sm:py-16 flex flex-col gap-10">
       <Container>
-        {/* Top Header & User Status Bar */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
-          <div>
-            <SectionHeader
-              badge="Terminal Overview"
-              title={`Welcome back, ${user?.name || 'Miner'}`}
-              description="Real-time telemetrics for your computational nodes, wallet balance, and verified ledger transactions."
-              align="left"
-            />
-            {user?.referralCode && (
-              <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-purple-950/40 border border-purple-800/30 text-xs text-purple-300">
-                <span className="text-gray-400">Referral Code:</span>
-                <span className="font-mono font-bold text-white">{user.referralCode}</span>
+        {/* User Profile Banner */}
+        <div className="mb-8 p-6 rounded-2xl bg-gradient-to-r from-purple-950/40 via-purple-900/20 to-black/60 border border-purple-800/40 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-purple-600/20 border border-purple-500/40 flex items-center justify-center text-purple-300 font-extrabold text-xl shadow-inner">
+              {profileUser?.name ? profileUser.name.charAt(0).toUpperCase() : 'M'}
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-xl font-extrabold text-white">
+                  {profileUser?.name || 'Miner'}
+                </h2>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-[10px] font-bold text-emerald-300 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  {profileUser?.accountStatus === 'suspended' ? 'SUSPENDED' : 'ACTIVE'}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/40 text-[10px] font-bold text-purple-300 uppercase">
+                  {profileUser?.role || 'USER'}
+                </span>
               </div>
-            )}
+              <div className="flex items-center gap-4 mt-1.5 text-xs text-gray-400 flex-wrap">
+                <span className="flex items-center gap-1">
+                  <span className="text-gray-500">Email:</span>
+                  <span className="text-gray-200 font-medium">{profileUser?.email || 'N/A'}</span>
+                </span>
+                <span className="hidden sm:inline text-gray-700">•</span>
+                <span className="flex items-center gap-1">
+                  <span className="text-gray-500">User ID:</span>
+                  <span className="font-mono text-purple-300">{profileUser?.id || profileUser?._id || 'N/A'}</span>
+                </span>
+                <span className="hidden sm:inline text-gray-700">•</span>
+                <span className="flex items-center gap-1">
+                  <span className="text-gray-500">Registered:</span>
+                  <span className="text-gray-300">{formatDate(profileUser?.registrationDate || profileUser?.createdAt)}</span>
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex items-center gap-3 w-full md:w-auto">
             <button
               onClick={handleSync}
               className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-300 hover:text-white transition-all w-full sm:w-auto"
@@ -295,7 +368,7 @@ export function DashboardPage() {
             </button>
 
             <Link to={ROUTES.PLANS} className="w-full sm:w-auto">
-              <Button variant="primary" size="md" className="w-full">
+              <Button variant="primary" size="md" className="w-full whitespace-nowrap">
                 + Browse Plans
               </Button>
             </Link>
@@ -305,133 +378,165 @@ export function DashboardPage() {
         {/* 4 Core Financial & Node Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
           {/* Card 1: Wallet Balance */}
-          <Card className="bg-white/[0.03] border-purple-900/40 p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">
-                Wallet Balance
-              </span>
-              <div className="w-8 h-8 rounded-lg bg-emerald-950/60 border border-emerald-800/40 flex items-center justify-center text-emerald-400">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                </svg>
+          <Card className="bg-white/[0.03] border-purple-900/40 p-5 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">
+                  Wallet Balance
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-emerald-950/60 border border-emerald-800/40 flex items-center justify-center text-emerald-400">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                {formatINR(wallet.balance)}
               </div>
             </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              ₹{Number(wallet.balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-4 flex items-center gap-2">
               <Link
                 to={ROUTES.WALLET}
-                className="flex-1 text-center py-1.5 px-2 rounded-lg bg-[#7A56D6]/20 hover:bg-[#7A56D6]/40 text-purple-200 hover:text-white border border-[#7A56D6]/40 text-xs font-semibold transition-all"
+                className="flex-1 text-center py-2 px-2 rounded-xl bg-[#7A56D6]/20 hover:bg-[#7A56D6]/40 text-purple-200 hover:text-white border border-[#7A56D6]/40 text-xs font-semibold transition-all"
               >
                 + Deposit
               </Link>
               <Link
                 to={ROUTES.WALLET}
-                className="flex-1 text-center py-1.5 px-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 text-xs font-semibold transition-all"
+                className="flex-1 text-center py-2 px-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 text-xs font-semibold transition-all"
               >
                 Withdraw
               </Link>
             </div>
           </Card>
 
-          {/* Card 2: Active Plans Count */}
-          <Card className="bg-white/[0.03] border-purple-900/40 p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">
-                Active Nodes
-              </span>
-              <div className="w-8 h-8 rounded-lg bg-purple-950/60 border border-purple-800/40 flex items-center justify-center text-purple-400">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
+          {/* Card 2: Active Investments Count */}
+          <Card className="bg-white/[0.03] border-purple-900/40 p-5 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">
+                  Active Investments
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-purple-950/60 border border-purple-800/40 flex items-center justify-center text-purple-400">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-baseline gap-2">
+                <span>{activePlans.count}</span>
+                <span className={`text-xs font-semibold ${activePlans.count > 0 ? 'text-emerald-400' : 'text-gray-400'}`}>
+                  {activePlans.count > 0 ? 'Online' : 'Idle'}
+                </span>
               </div>
             </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-baseline gap-2">
-              <span>{activePlans.count}</span>
-              <span className="text-xs font-semibold text-emerald-400">
-                {activePlans.count > 0 ? 'Online' : 'Idle'}
-              </span>
-            </div>
-            <p className="text-[11px] text-gray-400 mt-2">Live computational mining capacity</p>
+            <p className="text-[11px] text-gray-400 mt-3">Live computational mining nodes</p>
           </Card>
 
           {/* Card 3: Today's Verified Earnings */}
-          <Card className="bg-white/[0.03] border-purple-900/40 p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">
-                Today's Earnings
-              </span>
-              <div className="w-8 h-8 rounded-lg bg-blue-950/60 border border-blue-800/40 flex items-center justify-center text-blue-400">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+          <Card className="bg-white/[0.03] border-purple-900/40 p-5 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">
+                  Today's Verified Earnings
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-blue-950/60 border border-blue-800/40 flex items-center justify-center text-blue-400">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                {earnings.isConfigured ? formatINR(earnings.today) : <span className="text-gray-400 text-2xl">₹0.00</span>}
               </div>
             </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              {earnings.isConfigured ? (
-                `₹${Number(earnings.today || 0).toLocaleString('en-IN')}`
-              ) : (
-                <span className="text-gray-400 text-lg">₹0</span>
-              )}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-2">
-              {earnings.isConfigured ? 'Settled daily yield' : 'Automated payouts not configured'}
+            <p className="text-[11px] text-gray-400 mt-3">
+              {earnings.isConfigured ? 'Settled daily yield' : 'Automated distributions pending'}
             </p>
           </Card>
 
           {/* Card 4: Total Verified Earnings */}
-          <Card className="bg-white/[0.03] border-purple-900/40 p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">
-                Total Verified Earnings
-              </span>
-              <div className="w-8 h-8 rounded-lg bg-amber-950/60 border border-amber-800/40 flex items-center justify-center text-amber-400">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
+          <Card className="bg-white/[0.03] border-purple-900/40 p-5 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">
+                  Total Verified Earnings
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-amber-950/60 border border-amber-800/40 flex items-center justify-center text-amber-400">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                {earnings.isConfigured ? formatINR(earnings.total) : <span className="text-gray-400 text-2xl">₹0.00</span>}
               </div>
             </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              {earnings.isConfigured ? (
-                `₹${Number(earnings.total || 0).toLocaleString('en-IN')}`
-              ) : (
-                <span className="text-gray-400 text-lg">₹0</span>
-              )}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-2">
-              {earnings.isConfigured ? 'Cumulative ledger settlement' : 'Verified payout ledger pending'}
+            <p className="text-[11px] text-gray-400 mt-3">
+              {earnings.isConfigured ? 'Cumulative ledger settlement' : 'Ledger settlement not configured'}
             </p>
           </Card>
         </div>
 
-        {/* Ledger Integrity Notice */}
-        <div className="mb-10 p-4 rounded-xl bg-purple-950/20 border border-purple-900/30 flex items-start gap-3 text-xs text-gray-300">
-          <svg className="w-4 h-4 text-[#7A56D6] flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <div>
-            <span className="font-semibold text-white block mb-0.5">Verified Ledger Policy</span>
-            <span className="text-gray-400 leading-relaxed">
-              Minetrades strictly derives income metrics from authenticated, settled transaction records.
-              In accordance with financial compliance, unverified or fabricated daily ROI is never calculated or credited.
-            </span>
+        {/* Referral Overview Widget */}
+        <div className="mb-10 p-6 rounded-2xl bg-purple-950/20 border border-purple-800/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-base">🎁</span>
+              <h3 className="text-base font-bold text-white">Refer & Earn Program</h3>
+            </div>
+            <p className="text-xs text-gray-300 leading-relaxed max-w-xl">
+              Invite friends to Minetrades. Earn instant wallet cash rewards whenever your referred miners activate an investment plan.
+            </p>
+            <div className="mt-4 flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/60 border border-purple-700/50">
+                <span className="text-xs text-gray-400">Referral Code:</span>
+                <span className="font-mono font-bold text-purple-300 text-sm">
+                  {dashboardData?.user?.referralCode || user?.referralCode || 'N/A'}
+                </span>
+                <button
+                  onClick={handleCopyReferral}
+                  className="ml-2 px-2.5 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-[11px] font-semibold text-purple-200 transition-all flex items-center gap-1"
+                  title="Copy referral code"
+                >
+                  {copiedCode ? (
+                    <span className="text-emerald-400 font-bold">✓ Copied!</span>
+                  ) : (
+                    <span>Copy Code</span>
+                  )}
+                </button>
+              </div>
+
+              <div className="px-3 py-1.5 rounded-xl bg-white/[0.03] border border-white/10 text-xs text-gray-300">
+                Total Referrals: <strong className="text-white">{referralSummary?.totalReferrals ?? 0}</strong>
+              </div>
+
+              <div className="px-3 py-1.5 rounded-xl bg-white/[0.03] border border-white/10 text-xs text-gray-300">
+                Rewards Earned: <strong className="text-emerald-400">{formatINR(referralSummary?.totalRewardsEarned ?? wallet.referralIncome ?? 0)}</strong>
+              </div>
+            </div>
           </div>
+
+          <Link to={ROUTES.REFERRALS} className="w-full md:w-auto">
+            <Button variant="secondary" size="sm" className="w-full whitespace-nowrap">
+              View Refer & Earn Program →
+            </Button>
+          </Link>
         </div>
 
-        {/* Active Node Subscriptions */}
+        {/* Purchased Plan Details Section (10 Fields) */}
         <div className="mb-12">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              Active Node Subscriptions ({activePlans.count})
+              Purchased Plan Details ({displayedPlans.length})
             </h3>
             <Link to={ROUTES.PLANS} className="text-xs text-purple-300 hover:text-white transition-colors">
               Explore All Plans →
             </Link>
           </div>
 
-          {activePlans.plans.length === 0 ? (
+          {displayedPlans.length === 0 ? (
             <div className="p-8 sm:p-12 text-center rounded-2xl bg-white/[0.02] border border-purple-900/30">
               <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-purple-950/60 border border-purple-800/40 flex items-center justify-center text-purple-400">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -449,49 +554,181 @@ export function DashboardPage() {
               </Link>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {activePlans.plans.map((p) => {
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {displayedPlans.map((p) => {
                 const remaining = p.remainingDays ?? 0;
+                const dailyEarningCalc = p.dailyEarning || (p.price && p.dailyRoiRate ? Math.round(p.price * p.dailyRoiRate * 100) / 100 : 0);
+                const dailyPercent = p.dailyRoiRate ? (p.dailyRoiRate * 100).toFixed(2) : '1.00';
                 return (
                   <div
                     key={p.id}
-                    className="p-5 rounded-2xl bg-white/[0.03] border border-purple-900/40 hover:border-[#7A56D6]/60 transition-all flex flex-col justify-between"
+                    className="p-6 rounded-2xl bg-white/[0.03] border border-purple-900/40 hover:border-[#7A56D6]/60 transition-all flex flex-col justify-between"
                   >
                     <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-base font-bold text-white">{p.name}</span>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold text-emerald-300 bg-emerald-950/60 border border-emerald-800/40 uppercase">
+                      {/* 1. Plan Name & 10. Status */}
+                      <div className="flex items-center justify-between mb-4 pb-3 border-b border-white/5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg font-bold text-white">{p.planName || p.name}</span>
+                          {p.hashRate && (
+                            <span className="text-[10px] text-purple-300 font-semibold px-2 py-0.5 rounded bg-purple-950/60 border border-purple-800/40">
+                              {p.hashRate}
+                            </span>
+                          )}
+                        </div>
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                            p.status === 'active'
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                              : p.status === 'completed'
+                              ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                              : 'bg-gray-800 text-gray-400 border-gray-700'
+                          }`}
+                        >
                           {p.status}
                         </span>
                       </div>
 
-                      <div className="space-y-2 text-xs mb-4">
-                        <div className="flex justify-between text-gray-400">
-                          <span>Purchase Price:</span>
-                          <span className="text-white font-semibold">₹{Number(p.price).toLocaleString('en-IN')}</span>
+                      {/* 10 Required Data Fields */}
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs mb-4">
+                        {/* 2. Purchase Amount */}
+                        <div>
+                          <span className="text-gray-400 block text-[11px]">Purchase Amount</span>
+                          <span className="text-white font-bold text-sm">
+                            {formatINR(p.purchaseAmount || p.price)}
+                          </span>
                         </div>
-                        <div className="flex justify-between text-gray-400">
-                          <span>Hash Capacity:</span>
-                          <span className="text-purple-300 font-semibold">{p.hashRate || 'Standard'}</span>
+
+                        {/* 8. Daily Earning Amount */}
+                        <div>
+                          <span className="text-gray-400 block text-[11px]">Daily Earning Amount</span>
+                          <span className="text-emerald-400 font-bold text-sm">
+                            {formatINR(dailyEarningCalc)} <span className="text-[10px] font-normal text-gray-400">({dailyPercent}%/day)</span>
+                          </span>
                         </div>
-                        <div className="flex justify-between text-gray-400">
-                          <span>Activated:</span>
-                          <span className="text-gray-300">{formatDate(p.startDate)}</span>
+
+                        {/* 3. Purchase Date */}
+                        <div>
+                          <span className="text-gray-400 block text-[11px]">Purchase Date</span>
+                          <span className="text-gray-200">{formatDate(p.purchaseDate || p.createdAt || p.startDate)}</span>
                         </div>
-                        <div className="flex justify-between text-gray-400">
-                          <span>Expires:</span>
-                          <span className="text-gray-300">{formatDate(p.endDate)}</span>
+
+                        {/* 6. Total Duration */}
+                        <div>
+                          <span className="text-gray-400 block text-[11px]">Total Duration</span>
+                          <span className="text-gray-200 font-medium">{p.totalDuration || `${p.durationDays || 30} Days`}</span>
+                        </div>
+
+                        {/* 4. Start Date */}
+                        <div>
+                          <span className="text-gray-400 block text-[11px]">Start Date</span>
+                          <span className="text-gray-200">{formatDate(p.startDate)}</span>
+                        </div>
+
+                        {/* 5. End Date */}
+                        <div>
+                          <span className="text-gray-400 block text-[11px]">End Date</span>
+                          <span className="text-gray-200">{formatDate(p.endDate)}</span>
+                        </div>
+
+                        {/* 7. Remaining Days */}
+                        <div>
+                          <span className="text-gray-400 block text-[11px]">Remaining Days</span>
+                          <span className="text-purple-300 font-bold">
+                            {remaining > 0 ? `${remaining} Days Left` : 'Matured / Expired'}
+                          </span>
+                        </div>
+
+                        {/* 9. Total Verified Earning */}
+                        <div>
+                          <span className="text-gray-400 block text-[11px]">Total Verified Earning</span>
+                          <span className="text-emerald-300 font-semibold">
+                            {formatINR(p.totalVerifiedEarning || 0)}
+                          </span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="pt-3 border-t border-white/10 flex items-center justify-between text-[11px]">
-                      <span className="text-gray-400">Remaining Term:</span>
-                      <span className="font-bold text-purple-300">{remaining} Days Left</span>
+                    <div className="pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-gray-400">
+                      <span>Node Status: <strong className="text-white capitalize">{p.status}</strong></span>
+                      <span className="font-mono text-purple-300 text-[10px]">Slot ID: {String(p.id).substring(0, 10)}...</span>
                     </div>
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+
+        {/* Daily Earning History Section */}
+        <div className="mb-12">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Daily Earning History
+              </h3>
+              <p className="text-xs text-gray-400">Direct ledger credits from verified network settlement batches</p>
+            </div>
+            <span className="text-xs text-gray-400 font-medium">
+              Verified Credits: <strong className="text-white">{dailyEarningsHistory.length}</strong>
+            </span>
+          </div>
+
+          {dailyEarningsHistory.length === 0 ? (
+            <div className="p-8 sm:p-10 text-center rounded-2xl bg-white/[0.02] border border-white/10">
+              <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-purple-950/40 border border-purple-800/40 flex items-center justify-center text-purple-400">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h4 className="text-sm font-semibold text-white mb-1">No Daily Earnings Credited Yet</h4>
+              <p className="text-xs text-gray-400 max-w-md mx-auto leading-relaxed">
+                No daily earnings have been credited yet. Earnings will appear here once verified returns are settled to your wallet.
+              </p>
+              <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-[10px] text-purple-300">
+                <span>🛡️</span> Zero Fabricated Returns • Strict Ledger Compliance
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-white/5 border-b border-white/10 text-gray-400 font-semibold uppercase tracking-wider text-[10px]">
+                    <tr>
+                      <th className="py-3 px-4">Earning Date</th>
+                      <th className="py-3 px-4">Credited Amount</th>
+                      <th className="py-3 px-4">Transaction Reference</th>
+                      <th className="py-3 px-4">Description</th>
+                      <th className="py-3 px-4 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 text-gray-300">
+                    {dailyEarningsHistory.map((item) => (
+                      <tr key={item.id} className="hover:bg-white/[0.02] transition-colors">
+                        <td className="py-3.5 px-4 whitespace-nowrap text-gray-300 font-medium">
+                          {formatDateTime(item.earningDate || item.date)}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap font-bold text-emerald-400">
+                          +{formatINR(item.amountCredited || item.amount)}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono text-[11px] text-purple-300">
+                          {item.transactionReference || item.reference || 'N/A'}
+                        </td>
+                        <td className="py-3.5 px-4 text-gray-300">
+                          {item.description || 'Verified Cloud Mining Yield'}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap text-center">
+                          <span className="px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-950/60 border border-emerald-800/40 text-emerald-400">
+                            {item.earningStatus || 'VERIFIED'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -505,7 +742,7 @@ export function DashboardPage() {
               </svg>
               Recent Transactions Ledger
             </h3>
-            <span className="text-xs text-gray-400">Latest activity records</span>
+            <span className="text-xs text-gray-400">Latest wallet transactions</span>
           </div>
 
           {recentTransactions.length === 0 ? (
@@ -557,7 +794,7 @@ export function DashboardPage() {
                               isCredit ? 'text-emerald-400' : 'text-rose-400'
                             }`}
                           >
-                            {isCredit ? '+' : '-'}₹{Number(tx.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {isCredit ? '+' : '-'}{formatINR(tx.amount)}
                           </td>
                           <td className="py-3.5 px-4 whitespace-nowrap text-center">
                             <span

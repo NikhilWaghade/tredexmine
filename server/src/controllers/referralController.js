@@ -2,6 +2,7 @@ import {
   getReferralSummary,
   getReferralHistory,
   validateReferralCode,
+  REFERRAL_REWARD_TIERS,
 } from '../services/referralService.js';
 
 /**
@@ -67,9 +68,21 @@ export const validateCode = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /api/v1/referrals/tiers
+ * Retrieve the active referral plan and reward tiers
+ */
+export const getReferralTiers = async (req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: REFERRAL_REWARD_TIERS,
+  });
+};
+
 export default {
   getMyReferrals,
   getMyReferralHistory,
   validateCode,
+  getReferralTiers,
 };
 

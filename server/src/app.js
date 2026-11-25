@@ -34,9 +34,16 @@ app.use(helmet());
  *   PATCH, DELETE) while allowing safe top-level navigations.
  */
 const getAllowedOrigins = () => {
-  const origins = new Set(['http://localhost:5173', 'http://127.0.0.1:5173']);
-  if (process.env.CLIENT_URL) origins.add(process.env.CLIENT_URL.trim());
-  if (process.env.STAGING_CLIENT_URL) origins.add(process.env.STAGING_CLIENT_URL.trim());
+  const origins = new Set([
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://minetrades-client.vercel.app',
+    'https://minetrades.onrender.com',
+  ]);
+  if (process.env.CLIENT_URL) origins.add(process.env.CLIENT_URL.trim().replace(/\/+$/, ''));
+  if (process.env.STAGING_CLIENT_URL) origins.add(process.env.STAGING_CLIENT_URL.trim().replace(/\/+$/, ''));
   return origins;
 };
 

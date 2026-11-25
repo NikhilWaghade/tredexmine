@@ -1,11 +1,34 @@
 import axios from 'axios';
 
 /**
+ * Resolves the appropriate backend API URL based on environment.
+ * - In production: strictly forbids localhost URLs (guards against misconfigured build environments)
+ *   and defaults safely to the deployed Render backend ('https://minetrades.onrender.com/api/v1').
+ * - In development: uses VITE_API_URL if provided, or defaults to '/api/v1' which is proxied
+ *   by the Vite development server to http://127.0.0.1:5000.
+ */
+export const getApiBaseUrl = () => {
+  const envUrl = (import.meta.env.VITE_API_URL || '').trim();
+
+  if (import.meta.env.PROD) {
+    if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+      return envUrl.endsWith('/api/v1') ? envUrl : `${envUrl.replace(/\/+$/, '')}/api/v1`;
+    }
+    return 'https://minetrades.onrender.com/api/v1';
+  }
+
+  if (envUrl) {
+    return envUrl;
+  }
+  return '/api/v1';
+};
+
+/**
  * Foundation Axios client instance configured for Minetrades
  * Matches backend /api/v1 prefix and securely attaches Bearer token if present
  */
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api/v1',
+  baseURL: getApiBaseUrl(),
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
@@ -73,7 +96,7 @@ api.interceptors.response.use(
 
       try {
         const storedRefreshToken = localStorage.getItem('refreshToken');
-        const refreshUrl = `${api.defaults.baseURL}/auth/refresh`;
+        const refreshUrl = `${(api.defaults.baseURL || '/api/v1').replace(/\/+$/, '')}/auth/refresh`;
 
         const refreshResponse = await axios.post(
           refreshUrl,

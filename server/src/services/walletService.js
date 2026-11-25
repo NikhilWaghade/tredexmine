@@ -1545,7 +1545,11 @@ export const getWithdrawalsByUserId = async (userId, options = {}) => {
   const { limit = 50, page = 1 } = options;
   const skip = (Math.max(1, parseInt(page, 10)) - 1) * Math.max(1, parseInt(limit, 10));
 
-  const withdrawals = await Withdrawal.find({ user: userId })
+  let findUserWithdrawals = Withdrawal.find({ user: userId });
+  if (typeof findUserWithdrawals.select === 'function') {
+    findUserWithdrawals = findUserWithdrawals.select('-payoutDetails.encryptedData -payoutDetails.encryptionIv -payoutDetails.encryptionTag');
+  }
+  const withdrawals = await findUserWithdrawals
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(parseInt(limit, 10));
@@ -1583,7 +1587,11 @@ export const getAllWithdrawalsAdmin = async (options = {}) => {
 
   const skip = (Math.max(1, parseInt(page, 10)) - 1) * Math.max(1, parseInt(limit, 10));
 
-  const withdrawals = await Withdrawal.find(query)
+  let findAdminWithdrawals = Withdrawal.find(query);
+  if (typeof findAdminWithdrawals.select === 'function') {
+    findAdminWithdrawals = findAdminWithdrawals.select('-payoutDetails.encryptedData -payoutDetails.encryptionIv -payoutDetails.encryptionTag');
+  }
+  const withdrawals = await findAdminWithdrawals
     .populate('user', 'name email role')
     .sort({ createdAt: -1 })
     .skip(skip)
@@ -3264,6 +3272,7 @@ export const revealWithdrawalPayoutAdmin = async (adminId, withdrawalId, ipAddre
       entityId: withdrawal._id,
       operationReference: withdrawal.withdrawalReference,
       action: 'WITHDRAWAL_PAYOUT_REVEAL',
+      decision: 'REVEAL_PAYOUT',
       performedBy: adminId,
       reason: 'Administrator unmasked and inspected payout credentials for execution',
       stateBefore: { maskedIdentifier: withdrawal.payoutDetails?.maskedIdentifier || '' },

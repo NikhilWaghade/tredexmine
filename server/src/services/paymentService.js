@@ -7,7 +7,10 @@ import { Deposit } from '../models/Deposit.js';
 import { Transaction } from '../models/Transaction.js';
 import { WebhookEvent } from '../models/WebhookEvent.js';
 import { processDepositCredit, reconcileDepositRecord } from './walletService.js';
-import { processReferralRewardForPlanPurchase } from './referralService.js';
+import {
+  processReferralRewardForPlanPurchase,
+  calculateReferralReward,
+} from './referralService.js';
 import {
   getRazorpayInstance,
   isRazorpayConfigured,
@@ -1031,11 +1034,13 @@ export const simulatePlanPurchaseDev = async (
             amount:
               activationResult.referralReward.rewardAmount ||
               activationResult.referralReward.amount ||
-              300,
+              calculateReferralReward(plan.price) ||
+              0,
             rewardAmount:
               activationResult.referralReward.rewardAmount ||
               activationResult.referralReward.amount ||
-              300,
+              calculateReferralReward(plan.price) ||
+              0,
           }
         : null,
     },

@@ -137,7 +137,7 @@ describe('Development-Only Referral & Payment Simulation Tests (POST /api/v1/pay
     const activePlan = {
       _id: testPlanId,
       name: 'Starter Cloud Miner',
-      price: 1500,
+      price: 1000,
       durationDays: 30,
       dailyRoiRate: 2.5,
       hashRate: '50 MH/s',
@@ -683,7 +683,7 @@ describe('Development-Only Referral & Payment Simulation Tests (POST /api/v1/pay
       assert.strictEqual(referralRewards.size, 0);
     });
 
-    it('simulates purchase for referred user, activating plan and crediting exactly ₹300 to referrer', async () => {
+    it('simulates purchase for referred user, activating plan and crediting referral reward to referrer', async () => {
       const initialReferrerBalance = wallets.get(String(referrerId)).balance;
 
       const res = await fetch(`${baseUrl}/api/v1/payments/dev-simulate-plan-purchase`, {
@@ -707,12 +707,12 @@ describe('Development-Only Referral & Payment Simulation Tests (POST /api/v1/pay
 
       // Verify referral reward response
       assert.ok(body.data.referralReward);
-      assert.strictEqual(body.data.referralReward.amount, 300);
+      assert.strictEqual(body.data.referralReward.amount, 250);
 
-      // Verify Referrer Wallet credited with exactly ₹300
+      // Verify Referrer Wallet credited with exactly ₹250 (for ₹1,000 plan)
       const updatedReferrerWallet = wallets.get(String(referrerId));
-      assert.strictEqual(updatedReferrerWallet.balance, initialReferrerBalance + 300);
-      assert.strictEqual(updatedReferrerWallet.referralIncome, 300);
+      assert.strictEqual(updatedReferrerWallet.balance, initialReferrerBalance + 250);
+      assert.strictEqual(updatedReferrerWallet.referralIncome, 250);
       assert.ok(updatedReferrerWallet.processedOperations.includes(`REF-REW-${referredUserId}`));
 
       // Verify Transaction ledger record created for referrer
@@ -721,7 +721,7 @@ describe('Development-Only Referral & Payment Simulation Tests (POST /api/v1/pay
       );
       assert.ok(referralTx);
       assert.strictEqual(String(referralTx.user), String(referrerId));
-      assert.strictEqual(referralTx.amount, 300);
+      assert.strictEqual(referralTx.amount, 250);
       assert.strictEqual(referralTx.type, 'credit');
       assert.strictEqual(referralTx.reference, `REF-REW-${referredUserId}`);
 
@@ -730,7 +730,7 @@ describe('Development-Only Referral & Payment Simulation Tests (POST /api/v1/pay
       const rewardDoc = [...referralRewards.values()][0];
       assert.strictEqual(String(rewardDoc.referrer), String(referrerId));
       assert.strictEqual(String(rewardDoc.referredUser), String(referredUserId));
-      assert.strictEqual(rewardDoc.rewardAmount, 300);
+      assert.strictEqual(rewardDoc.rewardAmount, 250);
       assert.strictEqual(rewardDoc.status, 'CREDITED');
 
       // Verify referred user marked REWARDED
@@ -776,9 +776,9 @@ describe('Development-Only Referral & Payment Simulation Tests (POST /api/v1/pay
       // Second plan must NOT generate a second referral reward
       assert.strictEqual(body2.data.referralReward.isAlreadyProcessed, true);
 
-      // Referrer wallet balance must remain identical (no second ₹300 credit)
+      // Referrer wallet balance must remain identical (no second reward credit)
       assert.strictEqual(wallets.get(String(referrerId)).balance, balanceAfterFirstPlan);
-      assert.strictEqual(wallets.get(String(referrerId)).referralIncome, 300);
+      assert.strictEqual(wallets.get(String(referrerId)).referralIncome, 250);
 
       // Exactly 1 referral reward document exists
       assert.strictEqual(referralRewards.size, 1);
@@ -853,7 +853,7 @@ describe('Development-Only Referral & Payment Simulation Tests (POST /api/v1/pay
 
       // Reward must still go to genuine referrer (Alice), never to spoofedReferrerId
       assert.strictEqual(String(body.data.referralReward.referrerId), String(referrerId));
-      assert.strictEqual(body.data.referralReward.amount, 300); // Fixed ₹300, not 999999
+      assert.strictEqual(body.data.referralReward.amount, 250); // Mapped ₹250 for ₹1000 plan, not 999999
     });
   });
 });

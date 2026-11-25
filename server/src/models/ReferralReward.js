@@ -17,10 +17,13 @@ const referralRewardSchema = new mongoose.Schema(
     },
     rewardAmount: {
       type: Number,
-      default: 300,
-      min: [300, 'Reward amount must be exactly 300 INR'],
-      max: [300, 'Reward amount must be exactly 300 INR'],
-      required: true,
+      required: [true, 'Reward amount is required'],
+      min: [0, 'Reward amount must be non-negative'],
+    },
+    planAmount: {
+      type: Number,
+      default: 0,
+      min: [0, 'Plan amount must be non-negative'],
     },
     currency: {
       type: String,

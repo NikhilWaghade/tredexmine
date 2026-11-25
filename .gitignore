@@ -20,3 +20,11 @@ client/.env.*.local
 !.env.example
 !server/.env.example
 !client/.env.example
+
+# Ignore environment-specific files
+.env.*
+server/.env.*
+client/.env.*
+!.env.example
+!server/.env.example
+!client/.env.example

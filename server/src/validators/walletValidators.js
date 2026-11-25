@@ -128,6 +128,8 @@ export const validateWithdrawalRequest = (req, res, next) => {
   // Validate amount
   if (amount === undefined || amount === null || typeof amount !== 'number' || !Number.isFinite(amount)) {
     errors.push('Withdrawal amount must be a valid finite number');
+  } else if (amount <= 0) {
+    errors.push('Withdrawal amount must be greater than zero');
   } else if (amount < 100) {
     errors.push('Minimum withdrawal amount is ₹100');
   } else if (amount > 500000) {
@@ -155,36 +157,64 @@ export const validateWithdrawalRequest = (req, res, next) => {
     }
   }
 
-  // Validate payoutDetails
-  if (payoutDetails !== undefined && payoutDetails !== null) {
-    if (typeof payoutDetails !== 'object' || Array.isArray(payoutDetails)) {
-      errors.push('Payout details must be an object');
+  const method = (payoutMethod || 'upi').toLowerCase();
+
+  // Validate method-specific fields
+  if (method === 'bank_transfer') {
+    if (!payoutDetails || typeof payoutDetails !== 'object' || Array.isArray(payoutDetails)) {
+      errors.push('Bank account payout details are required');
     } else {
-      const method = (payoutMethod || 'upi').toLowerCase();
-      if (method === 'upi') {
+      const {
+        accountHolderName,
+        bankName,
+        accountNumber,
+        confirmAccountNumber,
+        ifscCode,
+      } = payoutDetails;
+
+      if (!accountHolderName || typeof accountHolderName !== 'string' || accountHolderName.trim().length === 0) {
+        errors.push('Account holder name is required');
+      } else if (accountHolderName.trim().length < 2 || accountHolderName.trim().length > 80) {
+        errors.push('Account holder name must be between 2 and 80 characters');
+      }
+
+      if (bankName !== undefined && bankName !== null && String(bankName).trim().length > 0) {
+        if (typeof bankName !== 'string' || bankName.trim().length < 2 || bankName.trim().length > 80) {
+          errors.push('Bank name must be between 2 and 80 characters');
+        }
+      }
+
+      if (!accountNumber || typeof accountNumber !== 'string' || accountNumber.trim().length === 0) {
+        errors.push('Bank account number is required');
+      } else if (!/^\d{9,18}$/.test(accountNumber.trim())) {
+        errors.push('Bank account number must be between 9 and 18 digits');
+      }
+
+      if (confirmAccountNumber !== undefined && confirmAccountNumber !== null) {
+        if (String(confirmAccountNumber).trim() !== String(accountNumber || '').trim()) {
+          errors.push('Account number and confirmation account number do not match');
+        }
+      }
+
+      if (!ifscCode || typeof ifscCode !== 'string' || ifscCode.trim().length === 0) {
+        errors.push('IFSC code is required');
+      } else if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscCode.trim().toUpperCase())) {
+        errors.push('Invalid IFSC code format (e.g. SBIN0123456)');
+      }
+    }
+  } else if (method === 'upi') {
+    if (payoutDetails !== undefined && payoutDetails !== null) {
+      if (typeof payoutDetails !== 'object' || Array.isArray(payoutDetails)) {
+        errors.push('Payout details must be an object');
+      } else {
         const upi = payoutDetails.identifier || payoutDetails.upiId;
-        if (upi !== undefined && upi !== null) {
+        if (payoutMethod === 'upi' && (upi === undefined || upi === null || String(upi).trim().length === 0)) {
+          errors.push('UPI ID is required');
+        } else if (upi !== undefined && upi !== null) {
           if (typeof upi !== 'string' || upi.trim().length === 0) {
             errors.push('UPI identifier must be a non-empty string');
           } else if (!/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z0-9]{2,64}$/.test(upi.trim())) {
             errors.push('Invalid UPI ID format (expected username@bank)');
-          }
-        }
-      } else if (method === 'bank_transfer') {
-        const { accountNumber, ifscCode, accountHolderName } = payoutDetails;
-        if (accountNumber !== undefined && accountNumber !== null) {
-          if (typeof accountNumber !== 'string' || !/^\d{9,18}$/.test(accountNumber.trim())) {
-            errors.push('Bank account number must be between 9 and 18 digits');
-          }
-        }
-        if (ifscCode !== undefined && ifscCode !== null) {
-          if (typeof ifscCode !== 'string' || !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscCode.trim().toUpperCase())) {
-            errors.push('Invalid IFSC code format (e.g. SBIN0123456)');
-          }
-        }
-        if (accountHolderName !== undefined && accountHolderName !== null) {
-          if (typeof accountHolderName !== 'string' || accountHolderName.trim().length === 0) {
-            errors.push('Account holder name must be a non-empty string');
           }
         }
       }

@@ -563,7 +563,7 @@ describe('Referral & Earn System — Business Rules, Security & Concurrency Test
       _id: new mongoose.Types.ObjectId(),
       user: referredUserId,
       plan: new mongoose.Types.ObjectId(),
-      amount: 2500,
+      amount: 1000,
       status: 'captured',
       orderId: 'order_mock_success_01',
       paymentId: 'pay_mock_success_01',
@@ -572,7 +572,7 @@ describe('Referral & Earn System — Business Rules, Security & Concurrency Test
     const res = await processReferralRewardForPlanPurchase({ payment });
     assert.strictEqual(res.success, true);
     assert.strictEqual(res.status, 'CREDITED');
-    assert.strictEqual(res.rewardAmount, 300);
+    assert.strictEqual(res.rewardAmount, 250);
 
     // Verify ReferralReward document exists
     assert.strictEqual(referralRewards.size, 1);
@@ -582,20 +582,21 @@ describe('Referral & Earn System — Business Rules, Security & Concurrency Test
     assert.strictEqual(reward.status, 'CREDITED');
   });
 
-  it('10. rewards exactly ₹300 regardless of the plan price', async () => {
-    // Test 1: Plan with ₹50,000 price
-    const highValuePayment = {
-      _id: new mongoose.Types.ObjectId(),
-      user: referredUserId,
-      plan: new mongoose.Types.ObjectId(),
-      amount: 50000,
-      status: 'captured',
-      orderId: 'order_high_50k',
-    };
+  it('10. enforces exact 5-tier referral reward schedule across all plan amounts', async () => {
+    const { calculateReferralReward } = await import('../src/services/referralService.js');
 
-    const res = await processReferralRewardForPlanPurchase({ payment: highValuePayment });
-    assert.strictEqual(res.rewardAmount, FIXED_REFERRAL_REWARD_INR);
-    assert.strictEqual(res.rewardAmount, 300);
+    // Verify all 5 tiers
+    assert.strictEqual(calculateReferralReward(300), 100);
+    assert.strictEqual(calculateReferralReward(500), 150);
+    assert.strictEqual(calculateReferralReward(1000), 250);
+    assert.strictEqual(calculateReferralReward(2000), 400);
+    assert.strictEqual(calculateReferralReward(5000), 500);
+
+    // Verify non-qualifying plan amounts receive 0 reward
+    assert.strictEqual(calculateReferralReward(150), 0);
+    assert.strictEqual(calculateReferralReward(2500), 0);
+    assert.strictEqual(calculateReferralReward(50000), 0);
+    assert.strictEqual(calculateReferralReward(null), 0);
   });
 
   it('11. credits reward to the referrer wallet balance and referralIncome', async () => {
@@ -612,8 +613,8 @@ describe('Referral & Earn System — Business Rules, Security & Concurrency Test
     await processReferralRewardForPlanPurchase({ payment });
 
     const updatedReferrerWallet = wallets.get(String(referrerId));
-    assert.strictEqual(updatedReferrerWallet.balance, initialReferrerBalance + 300);
-    assert.strictEqual(updatedReferrerWallet.referralIncome, 300);
+    assert.strictEqual(updatedReferrerWallet.balance, initialReferrerBalance + 250);
+    assert.strictEqual(updatedReferrerWallet.referralIncome, 250);
   });
 
   it('12. ensures reward is NOT credited to the referred user wallet', async () => {
@@ -652,17 +653,17 @@ describe('Referral & Earn System — Business Rules, Security & Concurrency Test
       orderId: 'order_plan_2',
     };
 
-    // First plan purchase -> reward granted
+    // First plan purchase -> reward granted (+250)
     const res1 = await processReferralRewardForPlanPurchase({ payment: plan1Payment });
     assert.strictEqual(res1.success, true);
-    assert.strictEqual(wallets.get(String(referrerId)).balance, 1300);
+    assert.strictEqual(wallets.get(String(referrerId)).balance, 1250);
 
     // Second plan purchase by same referred user -> reward strictly skipped
     const res2 = await processReferralRewardForPlanPurchase({ payment: plan2Payment });
     assert.strictEqual(res2.isAlreadyProcessed, true);
 
-    // Balance remains exactly 1300 (never 1600)
-    assert.strictEqual(wallets.get(String(referrerId)).balance, 1300);
+    // Balance remains exactly 1250 (never credited twice)
+    assert.strictEqual(wallets.get(String(referrerId)).balance, 1250);
     assert.strictEqual(referralRewards.size, 1);
   });
 
@@ -676,21 +677,21 @@ describe('Referral & Earn System — Business Rules, Security & Concurrency Test
       orderId: 'order_webhook_replay',
     };
 
-    // First webhook delivery
+    // First webhook delivery (+400)
     const res1 = await processReferralRewardForPlanPurchase({ payment });
     assert.strictEqual(res1.success, true);
-    assert.strictEqual(wallets.get(String(referrerId)).balance, 1300);
+    assert.strictEqual(wallets.get(String(referrerId)).balance, 1400);
 
     // Second webhook delivery (replay)
     const res2 = await processReferralRewardForPlanPurchase({ payment });
     assert.strictEqual(res2.isAlreadyProcessed, true);
 
     // Balance unchanged
-    assert.strictEqual(wallets.get(String(referrerId)).balance, 1300);
+    assert.strictEqual(wallets.get(String(referrerId)).balance, 1400);
     assert.strictEqual(transactions.length, 1);
   });
 
-  it('15. concurrent reward processing requests resolve to exactly one ₹300 credit', async () => {
+  it('15. concurrent reward processing requests resolve to exactly one reward credit', async () => {
     const payment = {
       _id: new mongoose.Types.ObjectId(),
       user: referredUserId,
@@ -713,8 +714,8 @@ describe('Referral & Earn System — Business Rules, Security & Concurrency Test
     assert.strictEqual(creditedCount, 1);
     assert.strictEqual(skippedCount, 1);
 
-    // Balance increased by strictly 300
-    assert.strictEqual(wallets.get(String(referrerId)).balance, 1300);
+    // Balance increased by strictly 400 (1000 + 400 = 1400)
+    assert.strictEqual(wallets.get(String(referrerId)).balance, 1400);
     assert.strictEqual(transactions.length, 1);
   });
 
@@ -723,7 +724,7 @@ describe('Referral & Earn System — Business Rules, Security & Concurrency Test
       _id: new mongoose.Types.ObjectId(),
       user: referredUserId,
       plan: new mongoose.Types.ObjectId(),
-      amount: 1500,
+      amount: 500,
       status: 'captured',
       orderId: 'order_ledger_check',
     };
@@ -734,11 +735,11 @@ describe('Referral & Earn System — Business Rules, Security & Concurrency Test
     const tx = transactions[0];
     assert.strictEqual(String(tx.user), String(referrerId));
     assert.strictEqual(tx.type, 'credit');
-    assert.strictEqual(tx.amount, 300);
+    assert.strictEqual(tx.amount, 150);
     assert.strictEqual(tx.status, 'completed');
     assert.strictEqual(tx.reference, `REF-REW-${referredUserId}`);
     assert.strictEqual(tx.balanceBefore, 1000);
-    assert.strictEqual(tx.balanceAfter, 1300);
+    assert.strictEqual(tx.balanceAfter, 1150);
   });
 
   // =========================================================================
@@ -762,7 +763,8 @@ describe('Referral & Earn System — Business Rules, Security & Concurrency Test
     const body = await res.json();
     assert.strictEqual(body.success, true);
     assert.strictEqual(body.data.referralCode, 'TXMALICE01');
-    assert.strictEqual(body.data.rewardAmountPerReferral, 300);
+    assert.ok(Array.isArray(body.data.rewardTiers));
+    assert.strictEqual(body.data.rewardTiers.length, 5);
     assert.strictEqual(body.data.totalReferrals, 1); // Bob Smith
 
     // Referred user has 0 referrals

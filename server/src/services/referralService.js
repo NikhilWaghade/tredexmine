@@ -2,11 +2,33 @@ import mongoose from 'mongoose';
 import { User } from '../models/User.js';
 import { Wallet } from '../models/Wallet.js';
 import { Transaction } from '../models/Transaction.js';
+import { Plan } from '../models/Plan.js';
 import { ReferralReward } from '../models/ReferralReward.js';
 import { getWalletByUserId } from './walletService.js';
 import { isTransactionSupported } from './planService.js';
 
-export const FIXED_REFERRAL_REWARD_INR = 300;
+export const REFERRAL_REWARD_MAP = Object.freeze({
+  300: 100,
+  500: 150,
+  1000: 250,
+  2000: 400,
+  5000: 500,
+});
+
+export const REFERRAL_REWARD_TIERS = Object.freeze([
+  { planAmount: 300, rewardAmount: 100, planName: 'Starter' },
+  { planAmount: 500, rewardAmount: 150, planName: 'Basic Plus' },
+  { planAmount: 1000, rewardAmount: 250, planName: 'Professional' },
+  { planAmount: 2000, rewardAmount: 400, planName: 'Advanced' },
+  { planAmount: 5000, rewardAmount: 500, planName: 'Premium' },
+]);
+
+export const calculateReferralReward = (planAmount) => {
+  const rounded = Math.round(Number(planAmount || 0));
+  return REFERRAL_REWARD_MAP[rounded] ?? 0;
+};
+
+export const FIXED_REFERRAL_REWARD_INR = 100;
 
 /**
  * Privacy-safe masking for user names or identifiers
@@ -145,6 +167,24 @@ export const processReferralRewardForPlanPurchase = async ({ payment, session = 
   // Unique idempotency reference key strictly scoped to the referred user
   const rewardRef = `REF-REW-${referredUserId}`;
 
+  // Calculate authoritative reward amount based on plan amount
+  let planAmount = Number(payment.amount);
+  if ((!planAmount || isNaN(planAmount)) && payment.plan) {
+    if (typeof payment.plan === 'object' && payment.plan.price != null) {
+      planAmount = Number(payment.plan.price);
+    } else if (mongoose.connection?.readyState === 1 || Plan.findById !== mongoose.Model.findById) {
+      const planDoc = await Plan.findById(payment.plan).select('price');
+      if (planDoc) {
+        planAmount = Number(planDoc.price);
+      }
+    }
+  }
+
+  const rewardAmount = calculateReferralReward(planAmount);
+  if (!rewardAmount || rewardAmount <= 0) {
+    return null; // Plan not eligible for referral reward
+  }
+
   // Session management: inherit or start transaction if supported
   let activeSession = session;
   let ownSession = false;
@@ -170,7 +210,8 @@ export const processReferralRewardForPlanPurchase = async ({ payment, session = 
     const rewardPayload = {
       referrer: referrer._id,
       referredUser: referredUser._id,
-      rewardAmount: FIXED_REFERRAL_REWARD_INR,
+      rewardAmount,
+      planAmount,
       currency: 'INR',
       qualifyingPayment: payment._id,
       qualifyingPlan: payment.plan,
@@ -179,7 +220,8 @@ export const processReferralRewardForPlanPurchase = async ({ payment, session = 
       metadata: {
         orderId: payment.orderId,
         paymentId: payment.paymentId,
-        planAmount: payment.amount,
+        planAmount,
+        rewardAmount,
       },
     };
 
@@ -213,8 +255,8 @@ export const processReferralRewardForPlanPurchase = async ({ payment, session = 
       },
       {
         $inc: {
-          balance: FIXED_REFERRAL_REWARD_INR,
-          referralIncome: FIXED_REFERRAL_REWARD_INR,
+          balance: rewardAmount,
+          referralIncome: rewardAmount,
         },
         $addToSet: { processedOperations: rewardRef },
       },
@@ -234,15 +276,15 @@ export const processReferralRewardForPlanPurchase = async ({ payment, session = 
     }
 
     const balanceAfter = updatedWallet.balance;
-    const balanceBefore = Math.round((balanceAfter - FIXED_REFERRAL_REWARD_INR) * 100) / 100;
+    const balanceBefore = Math.round((balanceAfter - rewardAmount) * 100) / 100;
 
     // 8. Create immutable completed Transaction ledger record
     const transactionData = {
       user: referrer._id,
       wallet: updatedWallet._id,
       type: 'credit',
-      amount: FIXED_REFERRAL_REWARD_INR,
-      description: `Referral Reward (₹${FIXED_REFERRAL_REWARD_INR}) - First Plan Purchase by User ${maskUserIdentifier(referredUser.name || referredUser.email)}`,
+      amount: rewardAmount,
+      description: `Referral Reward (₹${rewardAmount}) - First Plan Purchase (₹${planAmount}) by User ${maskUserIdentifier(referredUser.name || referredUser.email)}`,
       status: 'completed',
       reference: rewardRef,
       balanceBefore,
@@ -291,7 +333,8 @@ export const processReferralRewardForPlanPurchase = async ({ payment, session = 
 
     return {
       success: true,
-      rewardAmount: FIXED_REFERRAL_REWARD_INR,
+      rewardAmount,
+      planAmount,
       referrerId: referrer._id,
       referredUserId: referredUser._id,
       status: 'CREDITED',
@@ -302,14 +345,14 @@ export const processReferralRewardForPlanPurchase = async ({ payment, session = 
     if (ownSession && activeSession) {
       try {
         await activeSession.abortTransaction();
-      } catch (_) {}
+      } catch (_) { }
     }
     throw error;
   } finally {
     if (ownSession && activeSession) {
       try {
         await activeSession.endSession();
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 };
@@ -336,11 +379,17 @@ export const getReferralSummary = async (userId) => {
   // Count total referred users
   const totalReferrals = await User.countDocuments({ referredBy: user._id });
 
-  // Count eligible referrals (completed rewards)
-  const eligibleReferrals = await ReferralReward.countDocuments({
+  // Sum total rewards earned dynamically from credited rewards
+  const creditedRewards = await ReferralReward.find({
     referrer: user._id,
     status: 'CREDITED',
-  });
+  }).select('rewardAmount');
+
+  const eligibleReferrals = creditedRewards.length;
+  const totalRewardsEarned = creditedRewards.reduce(
+    (acc, r) => acc + Number(r.rewardAmount || 0),
+    0
+  );
 
   // Count pending referrals (registered, plan not yet purchased)
   const pendingRewards = await User.countDocuments({
@@ -348,15 +397,13 @@ export const getReferralSummary = async (userId) => {
     referralRewardStatus: 'PENDING',
   });
 
-  // Total rewards earned strictly calculated from credited rewards
-  const totalRewardsEarned = eligibleReferrals * FIXED_REFERRAL_REWARD_INR;
-
   const referralLink = buildReferralUrl(user.referralCode);
 
   return {
     referralCode: user.referralCode,
     referralLink,
-    rewardAmountPerReferral: FIXED_REFERRAL_REWARD_INR,
+    rewardAmountPerReferral: 100,
+    rewardTiers: REFERRAL_REWARD_TIERS,
     currency: 'INR',
     totalReferrals,
     eligibleReferrals,
@@ -410,7 +457,7 @@ export const getReferralHistory = async (userId, options = {}) => {
       registeredAt: u.createdAt,
       status: isCredited ? 'Active (Plan Purchased)' : 'Registered (Awaiting Plan)',
       rewardStatus: isCredited ? 'CREDITED' : 'PENDING',
-      rewardAmount: isCredited ? FIXED_REFERRAL_REWARD_INR : 0,
+      rewardAmount: isCredited ? Number(reward?.rewardAmount || 0) : 0,
       currency: 'INR',
       creditedAt: reward?.creditedAt || null,
     };
@@ -429,6 +476,9 @@ export const getReferralHistory = async (userId, options = {}) => {
 };
 
 export default {
+  REFERRAL_REWARD_MAP,
+  REFERRAL_REWARD_TIERS,
+  calculateReferralReward,
   FIXED_REFERRAL_REWARD_INR,
   maskUserIdentifier,
   buildReferralUrl,

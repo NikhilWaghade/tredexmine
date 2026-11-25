@@ -230,6 +230,7 @@ describe('MAT-28 — Secure Admin Webhook Quarantine Management Tests', () => {
       }
       const chain = {
         populate: () => chain,
+        select: () => chain,
         sort: () => chain,
         skip: (n) => {
           filtered = filtered.slice(n);

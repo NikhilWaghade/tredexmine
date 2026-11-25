@@ -101,6 +101,7 @@ export function WalletPage() {
   const [accountHolderName, setAccountHolderName] = useState('');
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
   const [confirmWithdrawModal, setConfirmWithdrawModal] = useState(false);
+  const [withdrawErrors, setWithdrawErrors] = useState({});
 
   // Cancellation state
   const [cancellingId, setCancellingId] = useState(null);
@@ -302,83 +303,94 @@ export function WalletPage() {
     }
   };
 
+  // Validate withdrawal fields for current method
+  const validateWithdrawForm = () => {
+    const errors = {};
+    const amountNum = Number(withdrawAmount);
+    const currentBalance = Number(walletData?.balance ?? balance ?? 0);
+
+    if (!withdrawAmount || isNaN(amountNum)) {
+      errors.amount = 'Please enter a valid withdrawal amount';
+    } else if (amountNum <= 0) {
+      errors.amount = 'Withdrawal amount must be greater than zero';
+    } else if (amountNum < 100) {
+      errors.amount = 'Minimum withdrawal amount is ₹100';
+    } else if (amountNum > 500000) {
+      errors.amount = 'Maximum withdrawal amount per transaction is ₹500,000';
+    } else if (amountNum > currentBalance) {
+      errors.amount = `Insufficient available balance. Available: ${formatINR(currentBalance)}`;
+    } else if (Math.abs(Math.round(amountNum * 100) - amountNum * 100) > 1e-6) {
+      errors.amount = 'Withdrawal amount cannot have more than 2 decimal places';
+    }
+
+    if (payoutMethod === 'upi') {
+      const upi = upiId.trim();
+      if (!upi) {
+        errors.upiId = 'UPI ID is required';
+      } else if (!/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z0-9]{2,64}$/.test(upi)) {
+        errors.upiId = 'Invalid UPI ID format (expected username@bank or mobile@upi)';
+      }
+    } else {
+      if (!bankAccountHolder.trim()) {
+        errors.bankAccountHolder = 'Account holder name is required as printed on bank passbook';
+      } else if (bankAccountHolder.trim().length < 2) {
+        errors.bankAccountHolder = 'Account holder name must be at least 2 characters';
+      }
+
+      if (!bankName.trim()) {
+        errors.bankName = 'Bank name is required (e.g. State Bank of India)';
+      } else if (bankName.trim().length < 2) {
+        errors.bankName = 'Bank name must be at least 2 characters';
+      }
+
+      if (!accountNumber.trim()) {
+        errors.accountNumber = 'Account number is required';
+      } else if (!/^\d{9,18}$/.test(accountNumber.trim())) {
+        errors.accountNumber = 'Account number must be between 9 and 18 digits';
+      }
+
+      if (!confirmAccountNumber.trim()) {
+        errors.confirmAccountNumber = 'Please re-enter your account number to confirm';
+      } else if (confirmAccountNumber.trim() !== accountNumber.trim()) {
+        errors.confirmAccountNumber = 'Account Number and Confirmation Account Number do not match';
+      }
+
+      if (!ifscCode.trim()) {
+        errors.ifscCode = 'IFSC code is required';
+      } else if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscCode.trim().toUpperCase())) {
+        errors.ifscCode = 'Invalid 11-character IFSC code format (e.g. SBIN0001234)';
+      }
+    }
+
+    setWithdrawErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   // Handle Withdrawal Request Submission
   const handleWithdrawalSubmit = async () => {
+    if (withdrawSubmitting) return; // Prevent double submissions
     setFeedback(null);
+
+    if (!validateWithdrawForm()) {
+      setConfirmWithdrawModal(false);
+      return;
+    }
+
     const amountNum = Number(withdrawAmount);
-    const currentBalance = Number(walletData?.balance || 0);
-
-    if (!amountNum || amountNum < 100) {
-      setFeedback({
-        type: 'error',
-        message: 'Minimum withdrawal amount is ₹100',
-      });
-      return;
-    }
-
-    if (amountNum > currentBalance) {
-      setFeedback({
-        type: 'error',
-        message: `Insufficient withdrawable balance. Available: ${formatINR(currentBalance)}`,
-      });
-      return;
-    }
-
     let payoutDetails;
     if (payoutMethod === 'upi') {
       const upi = upiId.trim();
-      if (!upi || !upi.includes('@')) {
-        setFeedback({
-          type: 'error',
-          message: 'Please provide a valid registered UPI ID (e.g. mobile@upi or name@okaxis)',
-        });
-        return;
-      }
       payoutDetails = {
         upiId: upi,
         identifier: upi,
         accountHolderName: accountHolderName.trim() || user?.name || '',
       };
     } else {
-      if (!bankAccountHolder.trim()) {
-        setFeedback({
-          type: 'error',
-          message: 'Please provide the Account Holder Name as registered in the bank',
-        });
-        return;
-      }
-      if (!bankName.trim()) {
-        setFeedback({
-          type: 'error',
-          message: 'Please provide the Bank Name (e.g. State Bank of India)',
-        });
-        return;
-      }
-      if (!accountNumber.trim() || accountNumber.trim().length < 8) {
-        setFeedback({
-          type: 'error',
-          message: 'Please provide a valid Account Number (minimum 8 digits)',
-        });
-        return;
-      }
-      if (accountNumber.trim() !== confirmAccountNumber.trim()) {
-        setFeedback({
-          type: 'error',
-          message: 'Account Number and Confirmation Account Number do not match',
-        });
-        return;
-      }
-      if (!ifscCode.trim() || ifscCode.trim().length !== 11) {
-        setFeedback({
-          type: 'error',
-          message: 'Please provide a valid 11-character IFSC Code (e.g. SBIN0001234)',
-        });
-        return;
-      }
       payoutDetails = {
         accountHolderName: bankAccountHolder.trim(),
         bankName: bankName.trim(),
         accountNumber: accountNumber.trim(),
+        confirmAccountNumber: confirmAccountNumber.trim(),
         ifscCode: ifscCode.trim().toUpperCase(),
         identifier: accountNumber.trim(),
       };
@@ -400,7 +412,9 @@ export function WalletPage() {
       if (res.success) {
         setFeedback({
           type: 'success',
-          message: `Withdrawal request for ${formatINR(amountNum)} submitted successfully! Funds reserved. Reference: ${res.withdrawal.withdrawalReference}`,
+          message: `Withdrawal request for ${formatINR(amountNum)} submitted successfully! Funds reserved.`,
+          reference: res.withdrawal?.withdrawalReference,
+          status: res.withdrawal?.status || 'PENDING',
         });
         setWithdrawAmount('');
         setUpiId('');
@@ -409,6 +423,7 @@ export function WalletPage() {
         setAccountNumber('');
         setConfirmAccountNumber('');
         setIfscCode('');
+        setWithdrawErrors({});
         await refreshWallet();
         await loadWalletDetails();
         setActiveTab('history');
@@ -417,9 +432,22 @@ export function WalletPage() {
         throw new Error(res.message || 'Failed to submit withdrawal request');
       }
     } catch (err) {
+      if (err.response?.status === 401) {
+        setFeedback({
+          type: 'error',
+          message: 'Your session has expired. Please log in again to request a withdrawal.',
+        });
+        window.dispatchEvent(new Event('auth:unauthorized'));
+        return;
+      }
+      const errMsg =
+        err.response?.data?.message ||
+        (Array.isArray(err.response?.data?.errors) ? err.response.data.errors.join(', ') : null) ||
+        err.message ||
+        'Withdrawal failed. Please check your network and try again.';
       setFeedback({
         type: 'error',
-        message: err.response?.data?.message || err.message || 'Withdrawal failed. Please try again.',
+        message: errMsg,
       });
     } finally {
       setWithdrawSubmitting(false);
@@ -507,7 +535,15 @@ export function WalletPage() {
               <span className="text-xl">
                 {feedback.type === 'success' ? '✓' : '⚠'}
               </span>
-              <p className="text-sm font-medium">{feedback.message}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm font-medium">{feedback.message}</p>
+                {feedback.reference && (
+                  <span className="font-mono text-xs bg-black/50 px-2.5 py-0.5 rounded-md border border-white/20 text-white font-bold">
+                    Ref: {feedback.reference}
+                  </span>
+                )}
+                {feedback.status && <StatusBadge status={feedback.status} />}
+              </div>
             </div>
             <button
               type="button"
@@ -927,19 +963,27 @@ export function WalletPage() {
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  setConfirmWithdrawModal(true);
+                  if (validateWithdrawForm()) {
+                    setConfirmWithdrawModal(true);
+                  }
                 }}
                 className="space-y-6"
+                noValidate
               >
                 {/* Amount Input */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
-                      Amount to Withdraw
+                      Amount to Withdraw <span className="text-purple-400">*</span>
                     </label>
                     <button
                       type="button"
-                      onClick={() => setWithdrawAmount(String(balance))}
+                      onClick={() => {
+                        setWithdrawAmount(String(balance));
+                        if (withdrawErrors.amount) {
+                          setWithdrawErrors((prev) => ({ ...prev, amount: null }));
+                        }
+                      }}
                       className="text-xs text-[#7A56D6] hover:text-purple-300 font-bold"
                     >
                       Use Max ({formatINR(balance)})
@@ -954,12 +998,22 @@ export function WalletPage() {
                       min="100"
                       max={balance}
                       value={withdrawAmount}
-                      onChange={(e) => setWithdrawAmount(e.target.value)}
+                      onChange={(e) => {
+                        setWithdrawAmount(e.target.value);
+                        if (withdrawErrors.amount) {
+                          setWithdrawErrors((prev) => ({ ...prev, amount: null }));
+                        }
+                      }}
                       placeholder="e.g. 500"
                       required
-                      className="w-full pl-9 pr-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white font-bold text-lg focus:outline-none focus:border-[#7A56D6] transition-colors"
+                      className={`w-full pl-9 pr-4 py-3 rounded-xl bg-black/60 border text-white font-bold text-lg focus:outline-none transition-colors ${
+                        withdrawErrors.amount ? 'border-rose-500/80 focus:border-rose-500' : 'border-white/10 focus:border-[#7A56D6]'
+                      }`}
                     />
                   </div>
+                  {withdrawErrors.amount && (
+                    <p className="text-xs text-rose-400 mt-1 font-medium">{withdrawErrors.amount}</p>
+                  )}
                   <p className="text-[11px] text-gray-400 mt-1.5">
                     Minimum: ₹100 • Reserved balance is refunded automatically if rejected or cancelled.
                   </p>
@@ -973,7 +1027,10 @@ export function WalletPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
-                      onClick={() => setPayoutMethod('upi')}
+                      onClick={() => {
+                        setPayoutMethod('upi');
+                        setWithdrawErrors({});
+                      }}
                       className={`p-3.5 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2 ${
                         payoutMethod === 'upi'
                           ? 'bg-[#7A56D6] text-white border-[#7A56D6] shadow-sm shadow-[#7A56D6]/40'
@@ -985,7 +1042,10 @@ export function WalletPage() {
 
                     <button
                       type="button"
-                      onClick={() => setPayoutMethod('bank_transfer')}
+                      onClick={() => {
+                        setPayoutMethod('bank_transfer');
+                        setWithdrawErrors({});
+                      }}
                       className={`p-3.5 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2 ${
                         payoutMethod === 'bank_transfer'
                           ? 'bg-[#7A56D6] text-white border-[#7A56D6] shadow-sm shadow-[#7A56D6]/40'
@@ -1007,11 +1067,21 @@ export function WalletPage() {
                       <input
                         type="text"
                         value={upiId}
-                        onChange={(e) => setUpiId(e.target.value)}
+                        onChange={(e) => {
+                          setUpiId(e.target.value);
+                          if (withdrawErrors.upiId) {
+                            setWithdrawErrors((prev) => ({ ...prev, upiId: null }));
+                          }
+                        }}
                         placeholder="e.g. mobile@upi or name@okhdfcbank"
                         required
-                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors font-mono"
+                        className={`w-full px-4 py-3 rounded-xl bg-black/60 border text-white text-sm focus:outline-none transition-colors font-mono ${
+                          withdrawErrors.upiId ? 'border-rose-500/80 focus:border-rose-500' : 'border-white/10 focus:border-[#7A56D6]'
+                        }`}
                       />
+                      {withdrawErrors.upiId && (
+                        <p className="text-xs text-rose-400 mt-1 font-medium">{withdrawErrors.upiId}</p>
+                      )}
                       <p className="text-[11px] text-gray-400 mt-1.5">
                         Funds will be transferred directly to this UPI address.
                       </p>
@@ -1039,11 +1109,21 @@ export function WalletPage() {
                       <input
                         type="text"
                         value={bankAccountHolder}
-                        onChange={(e) => setBankAccountHolder(e.target.value)}
+                        onChange={(e) => {
+                          setBankAccountHolder(e.target.value);
+                          if (withdrawErrors.bankAccountHolder) {
+                            setWithdrawErrors((prev) => ({ ...prev, bankAccountHolder: null }));
+                          }
+                        }}
                         placeholder="Full name as printed on bank passbook / statement"
                         required
-                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors"
+                        className={`w-full px-4 py-3 rounded-xl bg-black/60 border text-white text-sm focus:outline-none transition-colors ${
+                          withdrawErrors.bankAccountHolder ? 'border-rose-500/80 focus:border-rose-500' : 'border-white/10 focus:border-[#7A56D6]'
+                        }`}
                       />
+                      {withdrawErrors.bankAccountHolder && (
+                        <p className="text-xs text-rose-400 mt-1 font-medium">{withdrawErrors.bankAccountHolder}</p>
+                      )}
                     </div>
 
                     <div>
@@ -1053,11 +1133,21 @@ export function WalletPage() {
                       <input
                         type="text"
                         value={bankName}
-                        onChange={(e) => setBankName(e.target.value)}
+                        onChange={(e) => {
+                          setBankName(e.target.value);
+                          if (withdrawErrors.bankName) {
+                            setWithdrawErrors((prev) => ({ ...prev, bankName: null }));
+                          }
+                        }}
                         placeholder="e.g. State Bank of India, HDFC Bank, ICICI Bank"
                         required
-                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors"
+                        className={`w-full px-4 py-3 rounded-xl bg-black/60 border text-white text-sm focus:outline-none transition-colors ${
+                          withdrawErrors.bankName ? 'border-rose-500/80 focus:border-rose-500' : 'border-white/10 focus:border-[#7A56D6]'
+                        }`}
                       />
+                      {withdrawErrors.bankName && (
+                        <p className="text-xs text-rose-400 mt-1 font-medium">{withdrawErrors.bankName}</p>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1068,11 +1158,21 @@ export function WalletPage() {
                         <input
                           type="password"
                           value={accountNumber}
-                          onChange={(e) => setAccountNumber(e.target.value)}
-                          placeholder="Bank Account Number"
+                          onChange={(e) => {
+                            setAccountNumber(e.target.value);
+                            if (withdrawErrors.accountNumber) {
+                              setWithdrawErrors((prev) => ({ ...prev, accountNumber: null }));
+                            }
+                          }}
+                          placeholder="Bank Account Number (9-18 digits)"
                           required
-                          className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors font-mono"
+                          className={`w-full px-4 py-3 rounded-xl bg-black/60 border text-white text-sm focus:outline-none transition-colors font-mono ${
+                            withdrawErrors.accountNumber ? 'border-rose-500/80 focus:border-rose-500' : 'border-white/10 focus:border-[#7A56D6]'
+                          }`}
                         />
+                        {withdrawErrors.accountNumber && (
+                          <p className="text-xs text-rose-400 mt-1 font-medium">{withdrawErrors.accountNumber}</p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
@@ -1081,11 +1181,21 @@ export function WalletPage() {
                         <input
                           type="text"
                           value={confirmAccountNumber}
-                          onChange={(e) => setConfirmAccountNumber(e.target.value)}
+                          onChange={(e) => {
+                            setConfirmAccountNumber(e.target.value);
+                            if (withdrawErrors.confirmAccountNumber) {
+                              setWithdrawErrors((prev) => ({ ...prev, confirmAccountNumber: null }));
+                            }
+                          }}
                           placeholder="Confirm Account Number"
                           required
-                          className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors font-mono"
+                          className={`w-full px-4 py-3 rounded-xl bg-black/60 border text-white text-sm focus:outline-none transition-colors font-mono ${
+                            withdrawErrors.confirmAccountNumber ? 'border-rose-500/80 focus:border-rose-500' : 'border-white/10 focus:border-[#7A56D6]'
+                          }`}
                         />
+                        {withdrawErrors.confirmAccountNumber && (
+                          <p className="text-xs text-rose-400 mt-1 font-medium">{withdrawErrors.confirmAccountNumber}</p>
+                        )}
                       </div>
                     </div>
 
@@ -1096,12 +1206,22 @@ export function WalletPage() {
                       <input
                         type="text"
                         value={ifscCode}
-                        onChange={(e) => setIfscCode(e.target.value.toUpperCase())}
+                        onChange={(e) => {
+                          setIfscCode(e.target.value.toUpperCase());
+                          if (withdrawErrors.ifscCode) {
+                            setWithdrawErrors((prev) => ({ ...prev, ifscCode: null }));
+                          }
+                        }}
                         placeholder="e.g. SBIN0001234, HDFC0000128"
                         required
                         maxLength={11}
-                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/10 text-white text-sm focus:outline-none focus:border-[#7A56D6] transition-colors uppercase font-mono tracking-wider"
+                        className={`w-full px-4 py-3 rounded-xl bg-black/60 border text-white text-sm focus:outline-none transition-colors uppercase font-mono tracking-wider ${
+                          withdrawErrors.ifscCode ? 'border-rose-500/80 focus:border-rose-500' : 'border-white/10 focus:border-[#7A56D6]'
+                        }`}
                       />
+                      {withdrawErrors.ifscCode && (
+                        <p className="text-xs text-rose-400 mt-1 font-medium">{withdrawErrors.ifscCode}</p>
+                      )}
                     </div>
                   </div>
                 )}

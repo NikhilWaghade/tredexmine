@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { referralService } from '../../services';
+import { REFERRAL_REWARD_TIERS } from '../../services/referralService';
 import { Container, Button, Card, SectionHeader } from '../../components/common';
 
 // Helper to format currency
@@ -37,6 +38,11 @@ export function ReferralsPage() {
   // Copy feedback states
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Active reward tiers: use backend summary tiers or fallback to predefined tiers
+  const rewardTiers = summary?.rewardTiers && summary.rewardTiers.length > 0
+    ? summary.rewardTiers
+    : REFERRAL_REWARD_TIERS;
 
   // Fetch summary and history data
   const fetchData = useCallback(async (page = 1) => {
@@ -104,7 +110,7 @@ export function ReferralsPage() {
       try {
         await navigator.share({
           title: 'Join Minetrades Cloud Computing',
-          text: `Use my referral code ${summary?.referralCode} to sign up and start mining with high-performance hash power!`,
+          text: `Use my referral code ${summary?.referralCode} to sign up and start cloud computing with daily yield settlements!`,
           url: link,
         });
       } catch (err) {
@@ -128,7 +134,7 @@ export function ReferralsPage() {
         <div className="mb-8">
           <SectionHeader
             title="Refer & Earn Rewards"
-            subtitle="Invite partners and colleagues to Minetrades. When they purchase their first cloud mining plan, you receive ₹300 instantly credited to your wallet balance."
+            subtitle="Invite partners and colleagues to Minetrades. When they purchase an eligible cloud computing plan, you receive instant referral rewards credited directly to your wallet balance."
           />
         </div>
 
@@ -147,6 +153,94 @@ export function ReferralsPage() {
           </div>
         )}
 
+        {/* SECTION: Refer Friends & Earn Rewards (Plan Amount vs Referral Reward Table) */}
+        <div className="mb-8 rounded-3xl bg-gradient-to-br from-[#120a28] via-[#0f0822] to-[#070312] border border-purple-800/40 p-6 sm:p-8 shadow-2xl shadow-purple-950/40 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-80 h-80 bg-[#7A56D6]/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+          <div className="relative z-10">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#7A56D6]/20 border border-[#7A56D6]/40 text-[#a882ff] text-xs font-semibold uppercase tracking-wider mb-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#7A56D6] animate-pulse" />
+                  Official Reward Schedule
+                </div>
+                <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                  Refer Friends & Earn Rewards
+                </h2>
+                <p className="text-xs sm:text-sm text-gray-400 mt-1 max-w-2xl">
+                  Earn high-yield commission rewards whenever your referred user activates an eligible cloud mining plan. Rewards are credited directly to your authoritative wallet balance.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 self-start sm:self-auto px-3.5 py-1.5 rounded-xl bg-emerald-950/50 border border-emerald-800/50 text-emerald-300 text-xs font-semibold">
+                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>Instant Wallet Credit</span>
+              </div>
+            </div>
+
+            {/* Clean 2-Column Reward Table */}
+            <div className="overflow-hidden rounded-2xl border border-purple-900/50 bg-black/40 shadow-inner">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[#170e33]/80 border-b border-purple-900/60 text-xs uppercase tracking-wider text-purple-200">
+                    <th className="py-3.5 px-4 sm:px-6 font-bold w-1/2">Plan Amount</th>
+                    <th className="py-3.5 px-4 sm:px-6 font-bold w-1/2 text-right sm:text-left">Referral Reward</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-purple-900/30 text-sm">
+                  {rewardTiers.map((tier) => (
+                    <tr
+                      key={tier.planAmount}
+                      className="hover:bg-purple-950/30 transition-colors group"
+                    >
+                      {/* Plan Amount Column */}
+                      <td className="py-4 px-4 sm:px-6">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-xl bg-purple-900/30 border border-purple-700/40 flex items-center justify-center text-purple-300 font-bold text-xs shrink-0 group-hover:scale-105 group-hover:border-[#7A56D6] transition-all">
+                            ⚡
+                          </div>
+                          <div>
+                            <div className="font-extrabold text-white text-base sm:text-lg">
+                              {formatINR(tier.planAmount)}
+                            </div>
+                            {tier.name && (
+                              <span className="text-[11px] font-medium text-purple-300/80 uppercase tracking-wide">
+                                {tier.name} Plan
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Referral Reward Column */}
+                      <td className="py-4 px-4 sm:px-6 text-right sm:text-left">
+                        <div className="inline-flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2">
+                          <span className="text-base sm:text-xl font-black text-emerald-400 group-hover:text-emerald-300 transition-colors">
+                            +{formatINR(tier.rewardAmount)}
+                          </span>
+                          <span className="text-[11px] font-medium text-emerald-400/70">
+                            Cash Credit
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Note under table */}
+            <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-gray-400 gap-2">
+              <span className="flex items-center gap-1.5">
+                <span className="text-purple-400 font-bold">•</span>
+                Rewards are calculated authoritatively and credited to your wallet balance immediately upon payment verification.
+              </span>
+              <span className="text-purple-400 font-medium">100% Guaranteed & Ledger Protected</span>
+            </div>
+          </div>
+        </div>
+
         {/* Hero Banner: How it Works */}
         <div className="mb-8 p-6 sm:p-8 rounded-3xl bg-gradient-to-r from-purple-950/40 via-[#130b2c]/60 to-purple-900/30 border border-purple-800/40 shadow-xl shadow-purple-950/30">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center md:text-left">
@@ -157,7 +251,7 @@ export function ReferralsPage() {
               <div>
                 <h4 className="font-semibold text-white text-sm sm:text-base">Share Your Code</h4>
                 <p className="text-xs text-gray-400 mt-1">
-                  Send your personalized link or referral code to your network or community.
+                  Send your personalized link or referral code to friends, traders, or your community.
                 </p>
               </div>
             </div>
@@ -169,7 +263,7 @@ export function ReferralsPage() {
               <div>
                 <h4 className="font-semibold text-white text-sm sm:text-base">Friend Joins & Purchases</h4>
                 <p className="text-xs text-gray-400 mt-1">
-                  Your referral registers and activates any eligible cloud mining plan.
+                  Your referred friend registers and activates an eligible cloud mining plan (₹300 to ₹5,000).
                 </p>
               </div>
             </div>
@@ -179,9 +273,9 @@ export function ReferralsPage() {
                 3
               </div>
               <div>
-                <h4 className="font-semibold text-white text-sm sm:text-base">Instant ₹300 Reward</h4>
+                <h4 className="font-semibold text-white text-sm sm:text-base">Instant Tier Reward</h4>
                 <p className="text-xs text-gray-400 mt-1">
-                  ₹300 is automatically credited to your wallet balance with a verifiable ledger entry.
+                  Receive up to ₹500 credited automatically to your wallet with an authoritative transaction ledger entry.
                 </p>
               </div>
             </div>
@@ -368,7 +462,7 @@ export function ReferralsPage() {
               </div>
               <h4 className="text-base font-bold text-white mb-1">No Referrals Yet</h4>
               <p className="text-xs text-gray-400 max-w-sm mb-4">
-                Share your referral code or link with other traders and cloud miners. When they purchase their first plan, you earn ₹300!
+                Share your referral code or link with other traders and cloud miners. When they purchase their first plan, you earn instant cash rewards!
               </p>
               <Button variant="primary" size="sm" onClick={handleCopyLink}>
                 {copiedLink ? 'Link Copied!' : 'Copy Referral Link'}
@@ -425,7 +519,7 @@ export function ReferralsPage() {
                         </td>
                         <td className="py-3.5 px-4 font-semibold">
                           {item.rewardStatus === 'CREDITED' ? (
-                            <span className="text-emerald-400 font-bold">+₹{item.rewardAmount}</span>
+                            <span className="text-emerald-400 font-bold">+{formatINR(item.rewardAmount)}</span>
                           ) : (
                             <span className="text-gray-500">₹0</span>
                           )}
@@ -460,7 +554,7 @@ export function ReferralsPage() {
                             : 'bg-amber-950/80 text-amber-300 border border-amber-800/60'
                         }`}
                       >
-                        {item.rewardStatus === 'CREDITED' ? '+₹300' : 'PENDING'}
+                        {item.rewardStatus === 'CREDITED' ? `+${formatINR(item.rewardAmount)}` : 'PENDING'}
                       </span>
                     </div>
 
